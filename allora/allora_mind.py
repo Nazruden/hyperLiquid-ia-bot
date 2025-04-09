@@ -4,11 +4,11 @@ from utils.helpers import round_price
 from strategy.custom_strategy import custom_strategy
 from utils.constants import ALLORA_API_BASE_URL
 from database.db_manager import DatabaseManager
-from strategy.deepseek_reviewer import DeepSeekReviewer
+from strategy.hyperbolic_reviewer import HyperbolicReviewer
 
 
 class AlloraMind:
-    def __init__(self, manager, allora_upshot_key, deepseek_api_key, threshold=0.03):
+    def __init__(self, manager, allora_upshot_key, hyperbolic_api_key, threshold=0.03):
         """
         Initializes the AlloraMind with a given OrderManager and strategy parameters.
 
@@ -22,7 +22,7 @@ class AlloraMind:
         self.timeout = 5
         self.base_url = ALLORA_API_BASE_URL
         self.db = DatabaseManager()
-        self.deepseek_reviewer = DeepSeekReviewer(deepseek_api_key)
+        self.hyperbolic_reviewer = HyperbolicReviewer(hyperbolic_api_key)
 
     def set_topic_ids(self, topic_ids):
         """
@@ -103,6 +103,11 @@ class AlloraMind:
 
             allora_signal, allora_diff, current_price, prediction = self.generate_signal(token)
 
+            if allora_signal == "HOLD":
+                print(f"Allora AI suggested HOLD for {token}. Skipping Hyperbolic review.")
+                time.sleep(self.timeout)  # Wait for the specified interval before the next prediction
+                continue
+
             # Pass more information to custom strategy
             custom_signal = custom_strategy(
                 token, 
@@ -111,7 +116,7 @@ class AlloraMind:
                 prediction
             )
 
-            # Add DeepSeek review before executing trade
+            # Proceed with Hyperbolic review only for BUY or SELL signals
             trade_data = {
                 'token': token,
                 'current_price': current_price,
@@ -120,8 +125,12 @@ class AlloraMind:
                 'direction': allora_signal,
                 'market_condition': 'ANALYSIS'
             }
-            review = self.deepseek_reviewer.review_trade(trade_data)
+            review = self.hyperbolic_reviewer.review_trade(trade_data)
             
+            if review is None:
+                print("Hyperbolic review failed: No response received.")
+                continue
+
             if review and review['approval'] and review['confidence'] > 70:
                 # Continue with existing trade execution logic
                 if custom_signal == "BUY" and allora_signal == "BUY":
@@ -160,10 +169,11 @@ class AlloraMind:
                                                           loss_target=stop_loss)
                     print(res)
             else:
-                print(f"Trade rejected by DeepSeek AI:")
-                print(f"Confidence: {review['confidence']}%")
-                print(f"Reasoning: {review['reasoning']}")
-                print(f"Risk Score: {review['risk_score']}/10")
+                print("Trade rejected by Hyperbolic AI:")
+                if review:
+                    print(f"Confidence: {review['confidence']}%")
+                    print(f"Reasoning: {review['reasoning']}")
+                    print(f"Risk Score: {review['risk_score']}/10")
                 return
 
     def monitor_positions(self):

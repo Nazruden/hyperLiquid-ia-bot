@@ -1,18 +1,16 @@
-# Environment variables
-.env
-.venv
-
-# Python
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
-*$py.class
 
+# Database files
+trading_logs.db
 
-# Database
-*.db
+# Environment variables
+.env
 
-# Logs
+# Other
 *.log
+*.jpeg
 
 # IDE
 .vscode/

@@ -3,8 +3,8 @@ from dotenv import load_dotenv
 
 class EnvLoader:
     def __init__(self):
-        # Load environment variables from .env file
-        load_dotenv()
+        # Explicitly reload environment variables from .env file
+        load_dotenv(override=True)
         
     def get_config(self):
         """
@@ -13,7 +13,7 @@ class EnvLoader:
         required_vars = [
             'HL_SECRET_KEY',
             'ALLORA_UPSHOT_KEY',
-            'DEEPSEEK_API_KEY'
+            'HYPERBOLIC_API_KEY'
         ]
         
         # Check for required variables

@@ -9,13 +9,13 @@ import time
 
 
 def main():
-    (address, info, exchange, vault, allora_upshot_key, deepseek_api_key, check_for_trades, price_gap,
+    (address, info, exchange, vault, allora_upshot_key, hyperbolic_api_key, check_for_trades, price_gap,
      allowed_amount_per_trade, max_leverage, allora_topics) = setup()
 
     manager = OrderManager(exchange, vault, allowed_amount_per_trade, max_leverage, info)
     res = manager.get_wallet_summary()
     print(res)
-    allora_mind = AlloraMind(manager, allora_upshot_key, deepseek_api_key, threshold=price_gap)
+    allora_mind = AlloraMind(manager, allora_upshot_key, hyperbolic_api_key, threshold=price_gap)
     allora_mind.set_topic_ids(allora_topics)
     allora_mind.start_allora_trade_bot(interval=check_for_trades)
 
