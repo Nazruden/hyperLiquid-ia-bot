@@ -12,14 +12,26 @@ class EnvLoader:
         """
         required_vars = [
             'HL_SECRET_KEY',
-            'ALLORA_UPSHOT_KEY',
-            'HYPERBOLIC_API_KEY'
+            'ALLORA_UPSHOT_KEY'
         ]
+        
+        # AI services are now optional - at least one must be provided
+        ai_services = {
+            'HYPERBOLIC_API_KEY': os.getenv('HYPERBOLIC_API_KEY'),
+            'OPENROUTER_API_KEY': os.getenv('OPENROUTER_API_KEY')
+        }
         
         # Check for required variables
         missing_vars = [var for var in required_vars if not os.getenv(var)]
         if missing_vars:
             raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
+        
+        # Validate at least one AI service is configured
+        available_ai_services = [name for name, key in ai_services.items() if key]
+        if not available_ai_services:
+            raise ValueError("At least one AI service must be configured: HYPERBOLIC_API_KEY or OPENROUTER_API_KEY")
+        
+        print(f"Available AI services: {', '.join(available_ai_services)}")
             
         # Trading parameters with defaults
         config = {
@@ -38,7 +50,9 @@ class EnvLoader:
             "allora_topics": {
                 "BTC": int(os.getenv('BTC_TOPIC_ID', '14')),
                 "ETH": int(os.getenv('ETH_TOPIC_ID', '13'))
-            }
+            },
+            "openrouter_api_key": os.getenv('OPENROUTER_API_KEY'),
+            "openrouter_model": os.getenv('OPENROUTER_MODEL', 'anthropic/claude-3-sonnet')
         }
         
         return config

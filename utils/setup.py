@@ -18,6 +18,8 @@ def setup():
     vault = config["vault"]
     allora_upshot_key = config["allora_upshot_key"]
     hyperbolic_api_key = os.getenv("HYPERBOLIC_API_KEY")
+    openrouter_api_key = config["openrouter_api_key"]
+    openrouter_model = config["openrouter_model"]
     hl_master_address = config["hl_master_address"]
     allora_topics = config["allora_topics"]
     check_for_trades = config["check_for_trades"]
@@ -39,11 +41,12 @@ def setup():
     info = Info(base_url, skip_ws=True)
     if vault != "":
         exchange = Exchange(account, base_url, account_address=address, vault_address=vault)
-        return (address, info, exchange, vault, allora_upshot_key, hyperbolic_api_key, check_for_trades,
+        return (address, info, exchange, vault, allora_upshot_key, hyperbolic_api_key, 
+                openrouter_api_key, openrouter_model, check_for_trades,
                 price_gap, allowed_amount_per_trade, max_leverage, allora_topics)
     else:
         exchange = Exchange(account, base_url, account_address=hl_master_address)
         return (hl_master_address, info, exchange, hl_master_address, allora_upshot_key, hyperbolic_api_key,
-                check_for_trades, price_gap, allowed_amount_per_trade, max_leverage, allora_topics)
+                openrouter_api_key, openrouter_model, check_for_trades, price_gap, allowed_amount_per_trade, max_leverage, allora_topics)
 
 

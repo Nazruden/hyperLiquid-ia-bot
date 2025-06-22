@@ -5,10 +5,11 @@ from strategy.custom_strategy import custom_strategy
 from utils.constants import ALLORA_API_BASE_URL
 from database.db_manager import DatabaseManager
 from strategy.hyperbolic_reviewer import HyperbolicReviewer
+from strategy.openrouter_reviewer import OpenRouterReviewer
 
 
 class AlloraMind:
-    def __init__(self, manager, allora_upshot_key, hyperbolic_api_key, threshold=0.03):
+    def __init__(self, manager, allora_upshot_key, hyperbolic_api_key, openrouter_api_key, openrouter_model, threshold=0.03):
         """
         Initializes the AlloraMind with a given OrderManager and strategy parameters.
 
@@ -22,7 +23,22 @@ class AlloraMind:
         self.timeout = 5
         self.base_url = ALLORA_API_BASE_URL
         self.db = DatabaseManager()
-        self.hyperbolic_reviewer = HyperbolicReviewer(hyperbolic_api_key)
+        
+        # Initialize AI reviewers only if API keys are provided
+        self.hyperbolic_reviewer = HyperbolicReviewer(hyperbolic_api_key) if hyperbolic_api_key else None
+        self.openrouter_reviewer = OpenRouterReviewer(openrouter_api_key, openrouter_model) if openrouter_api_key else None
+        
+        # Validate at least one AI service is available
+        if not self.hyperbolic_reviewer and not self.openrouter_reviewer:
+            raise ValueError("At least one AI validation service must be configured (Hyperbolic or OpenRouter)")
+        
+        # Log which AI services are active
+        active_services = []
+        if self.hyperbolic_reviewer:
+            active_services.append("Hyperbolic AI")
+        if self.openrouter_reviewer:
+            active_services.append("OpenRouter AI")
+        print(f"AI Validation Services: {', '.join(active_services)}")
 
     def set_topic_ids(self, topic_ids):
         """
@@ -125,13 +141,43 @@ class AlloraMind:
                 'direction': allora_signal,
                 'market_condition': 'ANALYSIS'
             }
-            review = self.hyperbolic_reviewer.review_trade(trade_data)
+            # Get reviews from both AI validators
+            hyperbolic_review = self.hyperbolic_reviewer.review_trade(trade_data) if self.hyperbolic_reviewer else None
+            openrouter_review = self.openrouter_reviewer.review_trade(trade_data) if self.openrouter_reviewer else None
             
-            if review is None:
-                print("Hyperbolic review failed: No response received.")
+            # Check if at least one validator responded
+            if hyperbolic_review is None and openrouter_review is None:
+                print("Both AI reviews failed: No response received.")
                 continue
 
-            if review and review['approval'] and review['confidence'] > 70:
+            # Both validators must approve for trade execution (AND logic)
+            hyperbolic_approves = hyperbolic_review and hyperbolic_review['approval'] and hyperbolic_review['confidence'] > 70 if hyperbolic_review else False
+            openrouter_approves = openrouter_review and openrouter_review['approval'] and openrouter_review['confidence'] > 70 if openrouter_review else False
+            
+            # Log individual validator results
+            if hyperbolic_review:
+                print(f"Hyperbolic AI - Approval: {hyperbolic_review['approval']}, Confidence: {hyperbolic_review['confidence']}%")
+            else:
+                print("Hyperbolic AI - No response")
+                
+            if openrouter_review:
+                print(f"OpenRouter AI - Approval: {openrouter_review['approval']}, Confidence: {openrouter_review['confidence']}%")
+            else:
+                print("OpenRouter AI - No response")
+
+            # Adaptive validation logic based on available services
+            if self.hyperbolic_reviewer and self.openrouter_reviewer:
+                # Both services available - require consensus (AND logic)
+                both_approve = hyperbolic_approves and openrouter_approves
+                validation_mode = "Consensus (both AI services must approve)"
+            else:
+                # Single service available - use OR logic
+                both_approve = hyperbolic_approves or openrouter_approves
+                validation_mode = "Single AI service validation"
+            
+            print(f"Validation Mode: {validation_mode}")
+            
+            if both_approve:
                 # Continue with existing trade execution logic
                 if custom_signal == "BUY" and allora_signal == "BUY":
                     signal = "BUY"
@@ -169,11 +215,13 @@ class AlloraMind:
                                                           loss_target=stop_loss)
                     print(res)
             else:
-                print("Trade rejected by Hyperbolic AI:")
-                if review:
-                    print(f"Confidence: {review['confidence']}%")
-                    print(f"Reasoning: {review['reasoning']}")
-                    print(f"Risk Score: {review['risk_score']}/10")
+                print("Trade rejected by AI consensus:")
+                if hyperbolic_review and not hyperbolic_approves:
+                    print(f"Hyperbolic AI rejection - Confidence: {hyperbolic_review['confidence']}%, Risk Score: {hyperbolic_review['risk_score']}/10")
+                    print(f"Reasoning: {hyperbolic_review['reasoning']}")
+                if openrouter_review and not openrouter_approves:
+                    print(f"OpenRouter AI rejection - Confidence: {openrouter_review['confidence']}%, Risk Score: {openrouter_review['risk_score']}/10")
+                    print(f"Reasoning: {openrouter_review['reasoning']}")
                 return
 
     def monitor_positions(self):
