@@ -45,12 +45,21 @@ HyperLiquid AI Trading Bot - An advanced AI-powered trading system for the Hyper
 - **R₅.₃** Configurable trading intervals and parameters
 - **R₅.₄** Topic ID mapping for AlloraNetwork predictions
 
-### R₆: Future Enhancement Roadmap 🚧
+### R₆: Dashboard & Monitoring System 🚧
 
-- **R₆.₁** Node.js backend migration
-- **R₆.₂** IPFS decentralized database integration
-- **R₆.₃** HyperLiquid EVM smart contract integration
-- **R₆.₄** React-based DApp development
+- **R₆.₁** Real-time web dashboard for bot monitoring
+- **R₆.₂** Bot control interface (start/stop/restart functionality)
+- **R₆.₃** Live trading metrics and performance visualization
+- **R₆.₄** Trade history browser with filtering and search
+- **R₆.₅** WebSocket-based real-time data streaming
+- **R₆.₆** Responsive design for mobile and desktop access
+
+### R₇: Future Enhancement Roadmap 🚧
+
+- **R₇.₁** Node.js backend migration
+- **R₇.₂** IPFS decentralized database integration
+- **R₇.₃** HyperLiquid EVM smart contract integration
+- **R₇.₄** React-based DApp development
 
 ## 🎯 Success Criteria
 
