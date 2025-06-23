@@ -1,6 +1,290 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+@plugin '@tailwindcss/forms';
+@plugin '@tailwindcss/typography';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* Semantic Text Colors - automatically switch with theme */
+  --color-text-primary: #111827;
+  --color-text-secondary: #6b7280;
+  --color-text-muted: #9ca3af;
+  --color-text-inverse: #ffffff;
+
+  /* Semantic Background Colors */
+  --color-bg-secondary: #e5e7eb;
+  --color-bg-secondary-hover: #d1d5db;
+
+  /* Light Mode Colors */
+  --color-primary-50: #eff6ff;
+  --color-primary-100: #dbeafe;
+  --color-primary-200: #bfdbfe;
+  --color-primary-300: #93c5fd;
+  --color-primary-400: #60a5fa;
+  --color-primary-500: #3b82f6;
+  --color-primary-600: #2563eb;
+  --color-primary-700: #1d4ed8;
+  --color-primary-800: #1e40af;
+  --color-primary-900: #1e3a8a;
+
+  /* Dark Mode Colors */
+  --color-dark-bg: #0f172a;
+  --color-dark-surface: #1e293b;
+  --color-dark-surface-hover: #334155;
+  --color-dark-border: #475569;
+  --color-dark-text-primary: #f8fafc;
+  --color-dark-text-secondary: #cbd5e1;
+  --color-dark-text-muted: #94a3b8;
+
+  --color-success-50: #f0fdf4;
+  --color-success-100: #dcfce7;
+  --color-success-200: #bbf7d0;
+  --color-success-300: #86efac;
+  --color-success-400: #4ade80;
+  --color-success-500: #22c55e;
+  --color-success-600: #16a34a;
+  --color-success-700: #15803d;
+  --color-success-800: #166534;
+  --color-success-900: #14532d;
+
+  --color-danger-50: #fef2f2;
+  --color-danger-100: #fee2e2;
+  --color-danger-200: #fecaca;
+  --color-danger-300: #fca5a5;
+  --color-danger-400: #f87171;
+  --color-danger-500: #ef4444;
+  --color-danger-600: #dc2626;
+  --color-danger-700: #b91c1c;
+  --color-danger-800: #991b1b;
+  --color-danger-900: #7f1d1d;
+
+  --animate-fade-in: fadeIn 0.5s ease-in-out;
+  --animate-slide-up: slideUp 0.3s ease-out;
+  --animate-pulse-slow: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+
+  @keyframes fadeIn {
+    0% {
+      opacity: 0;
+    }
+    100% {
+      opacity: 1;
+    }
+  }
+  @keyframes slideUp {
+    0% {
+      transform: translateY(10px);
+      opacity: 0;
+    }
+    100% {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+}
+
+/* Dark mode semantic color overrides */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-text-primary: var(--color-dark-text-primary);
+    --color-text-secondary: var(--color-dark-text-secondary);
+    --color-text-muted: var(--color-dark-text-muted);
+    --color-text-inverse: #1f2937;
+  }
+}
+
+/* Class-based dark mode overrides */
+.dark {
+  --color-text-primary: var(--color-dark-text-primary);
+  --color-text-secondary: var(--color-dark-text-secondary);
+  --color-text-muted: var(--color-dark-text-muted);
+  --color-text-inverse: #1f2937;
+  --color-bg-secondary: var(--color-dark-surface-hover);
+  --color-bg-secondary-hover: var(--color-dark-border);
+}
+
+/*
+  The default border color has changed to `currentcolor` in Tailwind CSS v4,
+  so we've added these compatibility styles to make sure everything still
+  looks the same as it did with Tailwind CSS v3.
+
+  If we ever want to remove these styles, we need to add an explicit border
+  color utility to any element that depends on these defaults.
+*/
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentcolor);
+  }
+}
+
+@utility card {
+  @apply bg-white dark:bg-dark-surface rounded-lg shadow-xs border border-gray-200 dark:border-dark-border p-6;
+}
+
+@utility card-header {
+  @apply flex items-center justify-between mb-4;
+}
+
+@utility metric-card {
+  @apply bg-white dark:bg-dark-surface rounded-lg shadow-xs border border-gray-200 dark:border-dark-border p-4;
+}
+
+@utility metric-value {
+  @apply text-2xl font-bold;
+  color: var(--color-text-primary);
+}
+
+@utility metric-label {
+  @apply text-sm font-medium;
+  color: var(--color-text-secondary);
+}
+
+/* Semantic text utilities */
+@utility text-primary {
+  color: var(--color-text-primary);
+}
+
+@utility text-secondary {
+  color: var(--color-text-secondary);
+}
+
+@utility text-muted {
+  color: var(--color-text-muted);
+}
+
+@utility heading {
+  @apply font-semibold;
+  color: var(--color-text-primary);
+}
+
+@utility label {
+  @apply text-sm;
+  color: var(--color-text-secondary);
+}
+
+@utility metric-change {
+  @apply text-xs font-medium;
+
+  &.positive {
+    @apply text-success-600;
+  }
+
+  &.negative {
+    @apply text-danger-600;
+  }
+}
+
+@utility positive {
+  &.metric-change {
+    @apply text-success-600;
+  }
+}
+
+@utility negative {
+  &.metric-change {
+    @apply text-danger-600;
+  }
+}
+
+@utility btn {
+  @apply inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-xs focus:outline-hidden focus:ring-2 focus:ring-offset-2 transition-colors duration-200;
+}
+
+@utility btn-primary {
+  @apply btn bg-primary-600 text-white hover:bg-primary-700 focus:ring-primary-500;
+}
+
+@utility btn-success {
+  @apply btn bg-success-600 text-white hover:bg-success-700 focus:ring-success-500;
+}
+
+@utility btn-danger {
+  @apply btn bg-danger-600 text-white hover:bg-danger-700 focus:ring-danger-500;
+}
+
+@utility btn-secondary {
+  @apply btn focus:ring-gray-500;
+  background-color: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+
+  &:hover {
+    background-color: var(--color-bg-secondary-hover);
+  }
+}
+
+@utility status-dot {
+  @apply inline-block w-2 h-2 rounded-full;
+
+  &.online {
+    @apply bg-success-500;
+  }
+
+  &.offline {
+    @apply bg-danger-500;
+  }
+
+  &.loading {
+    @apply bg-yellow-500 animate-pulse;
+  }
+}
+
+@utility online {
+  &.status-dot {
+    @apply bg-success-500;
+  }
+}
+
+@utility offline {
+  &.status-dot {
+    @apply bg-danger-500;
+  }
+}
+
+@utility loading {
+  &.status-dot {
+    @apply bg-yellow-500 animate-pulse;
+  }
+}
+
+@utility table {
+  @apply min-w-full divide-y divide-gray-200;
+
+  & th {
+    @apply px-6 py-3 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider;
+  }
+
+  & td {
+    @apply px-6 py-4 whitespace-nowrap text-sm text-gray-900;
+  }
+
+  & tbody tr:nth-child(even) {
+    @apply bg-gray-50;
+  }
+}
+
+@utility sidebar {
+  @apply fixed inset-y-0 left-0 z-50 w-64 bg-white shadow-lg transform transition-transform duration-300 ease-in-out;
+}
+
+@utility main-content {
+  @apply ml-64 min-h-screen bg-gray-50;
+}
+
+@utility text-gradient {
+  @apply bg-linear-to-r from-primary-600 to-primary-800 bg-clip-text text-transparent;
+}
+
+@utility animate-fade-in {
+  animation: fadeIn 0.5s ease-in-out;
+}
+
+@utility animate-slide-up {
+  animation: slideUp 0.3s ease-out;
+}
 
 @layer base {
   html {
@@ -9,114 +293,6 @@
 
   body {
     @apply bg-gray-50 text-gray-900 antialiased;
-  }
-}
-
-@layer components {
-  .card {
-    @apply bg-white rounded-lg shadow-sm border border-gray-200 p-6;
-  }
-
-  .card-header {
-    @apply flex items-center justify-between mb-4;
-  }
-
-  .metric-card {
-    @apply bg-white rounded-lg shadow-sm border border-gray-200 p-4;
-  }
-
-  .metric-value {
-    @apply text-2xl font-bold text-gray-900;
-  }
-
-  .metric-label {
-    @apply text-sm font-medium text-gray-500;
-  }
-
-  .metric-change {
-    @apply text-xs font-medium;
-  }
-
-  .metric-change.positive {
-    @apply text-success-600;
-  }
-
-  .metric-change.negative {
-    @apply text-danger-600;
-  }
-
-  .btn {
-    @apply inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 transition-colors duration-200;
-  }
-
-  .btn-primary {
-    @apply btn bg-primary-600 text-white hover:bg-primary-700 focus:ring-primary-500;
-  }
-
-  .btn-success {
-    @apply btn bg-success-600 text-white hover:bg-success-700 focus:ring-success-500;
-  }
-
-  .btn-danger {
-    @apply btn bg-danger-600 text-white hover:bg-danger-700 focus:ring-danger-500;
-  }
-
-  .btn-secondary {
-    @apply btn bg-gray-200 text-gray-900 hover:bg-gray-300 focus:ring-gray-500;
-  }
-
-  .status-dot {
-    @apply inline-block w-2 h-2 rounded-full;
-  }
-
-  .status-dot.online {
-    @apply bg-success-500;
-  }
-
-  .status-dot.offline {
-    @apply bg-danger-500;
-  }
-
-  .status-dot.loading {
-    @apply bg-yellow-500 animate-pulse;
-  }
-
-  .table {
-    @apply min-w-full divide-y divide-gray-200;
-  }
-
-  .table th {
-    @apply px-6 py-3 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider;
-  }
-
-  .table td {
-    @apply px-6 py-4 whitespace-nowrap text-sm text-gray-900;
-  }
-
-  .table tbody tr:nth-child(even) {
-    @apply bg-gray-50;
-  }
-
-  .sidebar {
-    @apply fixed inset-y-0 left-0 z-50 w-64 bg-white shadow-lg transform transition-transform duration-300 ease-in-out;
-  }
-
-  .main-content {
-    @apply ml-64 min-h-screen bg-gray-50;
-  }
-}
-
-@layer utilities {
-  .text-gradient {
-    @apply bg-gradient-to-r from-primary-600 to-primary-800 bg-clip-text text-transparent;
-  }
-
-  .animate-fade-in {
-    animation: fadeIn 0.5s ease-in-out;
-  }
-
-  .animate-slide-up {
-    animation: slideUp 0.3s ease-out;
   }
 }
 

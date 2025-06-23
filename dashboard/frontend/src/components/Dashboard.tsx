@@ -13,6 +13,7 @@ import BotStatus from "./BotStatus";
 import LiveMetrics from "./LiveMetrics";
 import TradeHistory from "./TradeHistory";
 import PerformanceChart from "./PerformanceChart";
+import ThemeToggle from "./ThemeToggle";
 
 const Dashboard: React.FC = () => {
   const [dashboardData, setDashboardData] = useState<DashboardMetrics | null>(
@@ -54,10 +55,10 @@ const Dashboard: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 dark:bg-dark-bg flex items-center justify-center">
         <div className="text-center">
           <div className="spinner w-8 h-8 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading dashboard...</p>
+          <p className="text-secondary">Loading dashboard...</p>
         </div>
       </div>
     );
@@ -65,13 +66,11 @@ const Dashboard: React.FC = () => {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 dark:bg-dark-bg flex items-center justify-center">
         <div className="text-center">
           <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-gray-900 mb-2">
-            Error Loading Dashboard
-          </h2>
-          <p className="text-gray-600 mb-4">{error}</p>
+          <h2 className="text-xl heading mb-2">Error Loading Dashboard</h2>
+          <p className="text-secondary mb-4">{error}</p>
           <button
             onClick={() => window.location.reload()}
             className="btn-primary"
@@ -84,19 +83,19 @@ const Dashboard: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-dark-bg">
       {/* Header */}
-      <header className="bg-white shadow-sm border-b border-gray-200">
+      <header className="bg-white dark:bg-dark-surface shadow-xs border-b border-gray-200 dark:border-dark-border">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-4">
             <div className="flex items-center">
               <Bot className="w-8 h-8 text-primary-600 mr-3" />
-              <h1 className="text-2xl font-bold text-gray-900">
+              <h1 className="text-2xl font-bold text-primary">
                 HyperLiquid AI Trading Bot
               </h1>
             </div>
 
-            {/* Connection Status */}
+            {/* Connection Status & Theme Toggle */}
             <div className="flex items-center space-x-4">
               <div className="flex items-center">
                 <div
@@ -104,13 +103,14 @@ const Dashboard: React.FC = () => {
                     isConnected ? "online" : "offline"
                   } mr-2`}
                 ></div>
-                <span className="text-sm text-gray-600">
+                <span className="text-sm text-secondary">
                   {isConnected ? "Connected" : "Disconnected"}
                 </span>
               </div>
               {connectionError && (
                 <div className="text-sm text-red-600">{connectionError}</div>
               )}
+              <ThemeToggle />
             </div>
           </div>
         </div>
@@ -166,9 +166,7 @@ const Dashboard: React.FC = () => {
           {/* Performance Chart */}
           <div className="card">
             <div className="card-header">
-              <h3 className="text-lg font-semibold text-gray-900">
-                Performance Chart
-              </h3>
+              <h3 className="text-lg heading">Performance Chart</h3>
             </div>
             <PerformanceChart />
           </div>
@@ -176,9 +174,7 @@ const Dashboard: React.FC = () => {
           {/* Recent Trades */}
           <div className="card">
             <div className="card-header">
-              <h3 className="text-lg font-semibold text-gray-900">
-                Recent Trades
-              </h3>
+              <h3 className="text-lg heading">Recent Trades</h3>
             </div>
             <TradeHistory limit={10} />
           </div>
@@ -189,13 +185,11 @@ const Dashboard: React.FC = () => {
           {/* System Status */}
           <div className="card">
             <div className="card-header">
-              <h3 className="text-lg font-semibold text-gray-900">
-                System Status
-              </h3>
+              <h3 className="text-lg heading">System Status</h3>
             </div>
             <div className="space-y-4">
               <div className="flex justify-between items-center">
-                <span className="text-sm text-gray-600">Bot Status</span>
+                <span className="text-sm label">Bot Status</span>
                 <span
                   className={`text-sm font-medium ${
                     botStatus?.status === "running"
@@ -207,8 +201,8 @@ const Dashboard: React.FC = () => {
                 </span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-sm text-gray-600">Uptime</span>
-                <span className="text-sm font-medium text-gray-900">
+                <span className="text-sm label">Uptime</span>
+                <span className="text-sm font-medium text-primary">
                   {botStatus?.uptime
                     ? `${Math.floor(botStatus.uptime / 3600)}h ${Math.floor(
                         (botStatus.uptime % 3600) / 60
@@ -217,13 +211,17 @@ const Dashboard: React.FC = () => {
                 </span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-sm text-gray-600">Total Trades</span>
-                <span className="text-sm font-medium text-gray-900">
+                <span className="text-sm text-gray-600 dark:text-dark-text-secondary">
+                  Total Trades
+                </span>
+                <span className="text-sm font-medium text-gray-900 dark:text-dark-text-primary">
                   {botStatus?.total_trades || 0}
                 </span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-sm text-gray-600">System Health</span>
+                <span className="text-sm text-gray-600 dark:text-dark-text-secondary">
+                  System Health
+                </span>
                 <span
                   className={`text-sm font-medium ${
                     liveMetrics?.system_status === "healthy"
@@ -242,19 +240,23 @@ const Dashboard: React.FC = () => {
           {/* Performance Summary */}
           <div className="card">
             <div className="card-header">
-              <h3 className="text-lg font-semibold text-gray-900">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-dark-text-primary">
                 Today's Summary
               </h3>
             </div>
             <div className="space-y-4">
               <div className="flex justify-between items-center">
-                <span className="text-sm text-gray-600">Trades Today</span>
-                <span className="text-sm font-medium text-gray-900">
+                <span className="text-sm text-gray-600 dark:text-dark-text-secondary">
+                  Trades Today
+                </span>
+                <span className="text-sm font-medium text-gray-900 dark:text-dark-text-primary">
                   {dashboardData?.total_trades_today || 0}
                 </span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-sm text-gray-600">P&L Today</span>
+                <span className="text-sm text-gray-600 dark:text-dark-text-secondary">
+                  P&L Today
+                </span>
                 <span
                   className={`text-sm font-medium ${
                     (dashboardData?.daily_pnl || 0) >= 0
@@ -285,7 +287,7 @@ const Dashboard: React.FC = () => {
           {/* Quick Actions */}
           <div className="card">
             <div className="card-header">
-              <h3 className="text-lg font-semibold text-gray-900">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-dark-text-primary">
                 Quick Actions
               </h3>
             </div>

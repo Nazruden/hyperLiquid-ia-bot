@@ -40,7 +40,7 @@ const LiveMetrics: React.FC<LiveMetricsProps> = ({
   };
 
   const getChangeColor = (changeValue: number): string => {
-    if (!showChangeColor) return "text-gray-600";
+    if (!showChangeColor) return "text-secondary";
     return changeValue >= 0 ? "text-success-600" : "text-danger-600";
   };
 
@@ -57,7 +57,7 @@ const LiveMetrics: React.FC<LiveMetricsProps> = ({
     <div className="metric-card animate-fade-in relative">
       <div className="flex items-center justify-between">
         <div className="flex items-center">
-          <div className="p-2 bg-primary-100 rounded-lg">
+          <div className="p-2 bg-primary-100 dark:bg-primary-900/20 rounded-lg">
             <Icon className="w-5 h-5 text-primary-600" />
           </div>
         </div>
@@ -69,7 +69,7 @@ const LiveMetrics: React.FC<LiveMetricsProps> = ({
           <div>
             <p className="metric-value">
               {loading ? (
-                <div className="animate-pulse bg-gray-200 h-8 w-24 rounded"></div>
+                <div className="animate-pulse bg-gray-200 dark:bg-dark-surface-hover h-8 w-24 rounded-sm"></div>
               ) : (
                 formatValue(value, format)
               )}

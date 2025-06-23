@@ -135,7 +135,7 @@ class ApiService {
   }
 
   async getDashboardMetrics(): Promise<ApiResponse<DashboardMetrics>> {
-    const response = await this.client.get("/api/analytics/dashboard");
+    const response = await this.client.get("/api/analytics/dashboard-metrics");
     return response.data;
   }
 

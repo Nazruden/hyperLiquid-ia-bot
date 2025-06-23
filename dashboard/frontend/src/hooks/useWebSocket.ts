@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { io, Socket } from "socket.io-client";
 import type {
   WebSocketMessage,
   BotStatus,
@@ -40,12 +39,12 @@ export const useWebSocket = (
   const [botStatus, setBotStatus] = useState<BotStatus | null>(null);
   const [liveMetrics, setLiveMetrics] = useState<LiveMetrics | null>(null);
 
-  const socketRef = useRef<Socket | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
   const reconnectCountRef = useRef(0);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const connect = useCallback(() => {
-    if (socketRef.current?.connected) {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
       console.log("WebSocket already connected");
       return;
     }
@@ -53,106 +52,82 @@ export const useWebSocket = (
     console.log("Connecting to WebSocket:", url);
     setConnectionError(null);
 
-    // Create socket connection
-    const socket = io(url, {
-      transports: ["websocket", "polling"],
-      timeout: 10000,
-      reconnection: false, // We'll handle reconnection manually
-    });
+    try {
+      const ws = new WebSocket(url);
 
-    socket.on("connect", () => {
-      console.log("WebSocket connected");
-      setIsConnected(true);
-      setConnectionError(null);
-      reconnectCountRef.current = 0;
-    });
+      ws.onopen = () => {
+        console.log("WebSocket connected");
+        setIsConnected(true);
+        setConnectionError(null);
+        reconnectCountRef.current = 0;
+      };
 
-    socket.on("disconnect", (reason) => {
-      console.log("WebSocket disconnected:", reason);
-      setIsConnected(false);
+      ws.onclose = (event) => {
+        console.log("WebSocket disconnected:", event.code, event.reason);
+        setIsConnected(false);
 
-      // Attempt reconnection if not manually disconnected
-      if (
-        reason !== "io client disconnect" &&
-        reconnectCountRef.current < reconnectAttempts
-      ) {
-        scheduleReconnect();
-      }
-    });
+        // Attempt reconnection if not manually closed
+        if (
+          event.code !== 1000 && // Normal closure
+          reconnectCountRef.current < reconnectAttempts
+        ) {
+          scheduleReconnect();
+        }
+      };
 
-    socket.on("connect_error", (error) => {
-      console.error("WebSocket connection error:", error);
-      setConnectionError(error.message);
-      setIsConnected(false);
+      ws.onerror = (error) => {
+        console.error("WebSocket error:", error);
+        setConnectionError("WebSocket connection failed");
+        setIsConnected(false);
 
-      // Attempt reconnection
-      if (reconnectCountRef.current < reconnectAttempts) {
-        scheduleReconnect();
-      } else {
-        setConnectionError(
-          `Failed to connect after ${reconnectAttempts} attempts`
-        );
-      }
-    });
+        // Attempt reconnection
+        if (reconnectCountRef.current < reconnectAttempts) {
+          scheduleReconnect();
+        } else {
+          setConnectionError(
+            `Failed to connect after ${reconnectAttempts} attempts`
+          );
+        }
+      };
 
-    // Handle different message types
-    socket.on("bot_status", (data: BotStatus) => {
-      console.log("Received bot status:", data);
-      setBotStatus(data);
-      setLastMessage({
-        type: "bot_status",
-        data,
-        timestamp: new Date().toISOString(),
-      });
-    });
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          console.log("Received WebSocket message:", message);
 
-    socket.on("live_metrics", (data: LiveMetrics) => {
-      console.log("Received live metrics:", data);
-      setLiveMetrics(data);
-      setLastMessage({
-        type: "live_metrics",
-        data,
-        timestamp: new Date().toISOString(),
-      });
-    });
+          setLastMessage({
+            type: message.type,
+            data: message.data,
+            timestamp: new Date().toISOString(),
+          });
 
-    socket.on("new_trade", (data) => {
-      console.log("Received new trade:", data);
-      setLastMessage({
-        type: "new_trade",
-        data,
-        timestamp: new Date().toISOString(),
-      });
-    });
+          // Handle different message types
+          switch (message.type) {
+            case "bot_status":
+              setBotStatus(message.data);
+              break;
+            case "live_metrics":
+              setLiveMetrics(message.data);
+              break;
+            case "new_trade":
+            case "position_update":
+            case "ai_insight":
+            case "alert":
+              // These are handled by the lastMessage state
+              break;
+            default:
+              console.log("Unknown message type:", message.type);
+          }
+        } catch (error) {
+          console.error("Error parsing WebSocket message:", error);
+        }
+      };
 
-    socket.on("position_update", (data) => {
-      console.log("Received position update:", data);
-      setLastMessage({
-        type: "position_update",
-        data,
-        timestamp: new Date().toISOString(),
-      });
-    });
-
-    socket.on("ai_insight", (data) => {
-      console.log("Received AI insight:", data);
-      setLastMessage({
-        type: "ai_insight",
-        data,
-        timestamp: new Date().toISOString(),
-      });
-    });
-
-    socket.on("alert", (data) => {
-      console.log("Received alert:", data);
-      setLastMessage({
-        type: "alert",
-        data,
-        timestamp: new Date().toISOString(),
-      });
-    });
-
-    socketRef.current = socket;
+      wsRef.current = ws;
+    } catch (error) {
+      console.error("Error creating WebSocket:", error);
+      setConnectionError("Failed to create WebSocket connection");
+    }
   }, [url, reconnectAttempts]);
 
   const scheduleReconnect = useCallback(() => {
@@ -179,10 +154,10 @@ export const useWebSocket = (
       reconnectTimeoutRef.current = null;
     }
 
-    // Disconnect socket
-    if (socketRef.current) {
-      socketRef.current.disconnect();
-      socketRef.current = null;
+    // Close WebSocket
+    if (wsRef.current) {
+      wsRef.current.close(1000, "Manual disconnect");
+      wsRef.current = null;
     }
 
     setIsConnected(false);
@@ -191,9 +166,9 @@ export const useWebSocket = (
   }, []);
 
   const sendMessage = useCallback((message: Record<string, unknown>) => {
-    if (socketRef.current?.connected) {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
       console.log("Sending WebSocket message:", message);
-      socketRef.current.emit("message", message);
+      wsRef.current.send(JSON.stringify(message));
     } else {
       console.warn("Cannot send message: WebSocket not connected");
     }
@@ -205,19 +180,24 @@ export const useWebSocket = (
       connect();
     }
 
+    // Cleanup on unmount
     return () => {
       disconnect();
     };
   }, [autoConnect, connect, disconnect]);
 
-  // Cleanup on unmount
+  // Ping to keep connection alive
   useEffect(() => {
-    return () => {
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
+    if (!isConnected) return;
+
+    const pingInterval = setInterval(() => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        sendMessage({ type: "ping" });
       }
-    };
-  }, []);
+    }, 30000); // Ping every 30 seconds
+
+    return () => clearInterval(pingInterval);
+  }, [isConnected, sendMessage]);
 
   return {
     isConnected,
