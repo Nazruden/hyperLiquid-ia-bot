@@ -93,13 +93,13 @@ const TradeHistory: React.FC<TradeHistoryProps> = ({
               <div className="flex items-center space-x-3">
                 <div className="w-8 h-8 bg-gray-200 rounded-full"></div>
                 <div>
-                  <div className="w-20 h-4 bg-gray-200 rounded mb-1"></div>
-                  <div className="w-16 h-3 bg-gray-200 rounded"></div>
+                  <div className="w-20 h-4 bg-gray-200 rounded-sm mb-1"></div>
+                  <div className="w-16 h-3 bg-gray-200 rounded-sm"></div>
                 </div>
               </div>
               <div className="text-right">
-                <div className="w-16 h-4 bg-gray-200 rounded mb-1"></div>
-                <div className="w-12 h-3 bg-gray-200 rounded"></div>
+                <div className="w-16 h-4 bg-gray-200 rounded-sm mb-1"></div>
+                <div className="w-12 h-3 bg-gray-200 rounded-sm"></div>
               </div>
             </div>
           </div>
@@ -138,7 +138,7 @@ const TradeHistory: React.FC<TradeHistoryProps> = ({
             className="flex items-center justify-between p-3 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors duration-200"
           >
             <div className="flex items-center space-x-3">
-              <div className="flex items-center justify-center w-8 h-8 bg-white rounded-full shadow-sm">
+              <div className="flex items-center justify-center w-8 h-8 bg-white rounded-full shadow-xs">
                 {getTradeIcon(trade.side)}
               </div>
               <div>

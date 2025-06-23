@@ -69,7 +69,7 @@ const LiveMetrics: React.FC<LiveMetricsProps> = ({
           <div>
             <p className="metric-value">
               {loading ? (
-                <div className="animate-pulse bg-gray-200 h-8 w-24 rounded"></div>
+                <div className="animate-pulse bg-gray-200 h-8 w-24 rounded-sm"></div>
               ) : (
                 formatValue(value, format)
               )}
