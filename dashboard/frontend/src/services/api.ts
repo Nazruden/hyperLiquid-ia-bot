@@ -9,6 +9,10 @@ import type {
   PerformanceMetrics,
   DashboardMetrics,
   SearchParams,
+  CryptoConfig,
+  CryptoStatus,
+  CryptoBatchUpdate,
+  CryptoCompatibility,
 } from "../types/trading";
 
 class ApiService {
@@ -186,6 +190,125 @@ class ApiService {
     }>
   > {
     const response = await this.client.get("/api/trades/statistics");
+    return response.data;
+  }
+
+  // Crypto Configuration Endpoints
+  async getCryptoStatus(): Promise<ApiResponse<CryptoStatus>> {
+    const response = await this.client.get("/api/crypto/status");
+    return response.data;
+  }
+
+  async getAvailableCryptos(): Promise<
+    ApiResponse<{
+      total_count: number;
+      cryptos: CryptoConfig[];
+      last_updated: string;
+    }>
+  > {
+    const response = await this.client.get("/api/crypto/available");
+    return response.data;
+  }
+
+  async getActiveCryptos(): Promise<
+    ApiResponse<{
+      total_count: number;
+      active_cryptos: Record<string, number>;
+    }>
+  > {
+    const response = await this.client.get("/api/crypto/active");
+    return response.data;
+  }
+
+  async activateCrypto(symbol: string): Promise<
+    ApiResponse<{
+      symbol: string;
+      topic_id?: number;
+      is_active: boolean;
+    }>
+  > {
+    const response = await this.client.post("/api/crypto/activate", {
+      symbol,
+      topic_id: 0, // Will be determined by backend
+    });
+    return response.data;
+  }
+
+  async deactivateCrypto(symbol: string): Promise<
+    ApiResponse<{
+      symbol: string;
+      is_active: boolean;
+    }>
+  > {
+    const response = await this.client.post("/api/crypto/deactivate", {
+      symbol,
+    });
+    return response.data;
+  }
+
+  async batchUpdateCryptos(
+    updates: Record<string, boolean>
+  ): Promise<ApiResponse<CryptoBatchUpdate>> {
+    const response = await this.client.put("/api/crypto/batch-update", {
+      updates,
+    });
+    return response.data;
+  }
+
+  async activatePopularCryptos(
+    setName: string = "recommended_starter"
+  ): Promise<
+    ApiResponse<{
+      activated: string[];
+      errors: string[];
+      total_activated: number;
+    }>
+  > {
+    const response = await this.client.post(
+      `/api/crypto/quick-actions/activate-popular?set_name=${setName}`
+    );
+    return response.data;
+  }
+
+  async clearAllCryptos(): Promise<
+    ApiResponse<{
+      deactivated: string[];
+      total_deactivated: number;
+    }>
+  > {
+    const response = await this.client.post(
+      "/api/crypto/quick-actions/clear-all"
+    );
+    return response.data;
+  }
+
+  async searchCryptos(params: {
+    query?: string;
+    availability?: string;
+    active_only?: boolean;
+  }): Promise<
+    ApiResponse<{
+      total_count: number;
+      cryptos: CryptoConfig[];
+      filtered_count: number;
+    }>
+  > {
+    const queryString = new URLSearchParams();
+    if (params.query) queryString.append("query", params.query);
+    if (params.availability)
+      queryString.append("availability", params.availability);
+    if (params.active_only)
+      queryString.append("active_only", params.active_only.toString());
+
+    const url = `/api/crypto/search${
+      queryString.toString() ? `?${queryString.toString()}` : ""
+    }`;
+    const response = await this.client.get(url);
+    return response.data;
+  }
+
+  async getCompatibilityCheck(): Promise<ApiResponse<CryptoCompatibility>> {
+    const response = await this.client.get("/api/crypto/compatibility");
     return response.data;
   }
 

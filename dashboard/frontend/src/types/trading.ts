@@ -160,6 +160,45 @@ export interface DashboardConfig {
   auto_refresh: boolean;
 }
 
+// Crypto Configuration Types
+export interface CryptoConfig {
+  symbol: string;
+  topic_id: number | null;
+  is_active: boolean;
+  availability: "both" | "hyperliquid" | "allora";
+  hyperliquid_available: boolean;
+  allora_available: boolean;
+  last_price?: number;
+  volume_24h?: number;
+  updated_at?: string;
+}
+
+export interface CryptoStatus {
+  total_available: number;
+  total_active: number;
+  availability_breakdown: {
+    both: number;
+    hyperliquid_only: number;
+    allora_only: number;
+  };
+  cryptos: CryptoConfig[];
+  last_updated: string;
+}
+
+export interface CryptoBatchUpdate {
+  activated: string[];
+  deactivated: string[];
+  errors: string[];
+  total_updated: number;
+}
+
+export interface CryptoCompatibility {
+  hyperliquid_tokens: number;
+  allora_topics: number;
+  compatible_cryptos: number;
+  compatibility_percentage: number;
+}
+
 // Error Types
 export interface ErrorInfo {
   code: string;
