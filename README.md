@@ -13,6 +13,7 @@ An advanced AI-powered trading bot for the HyperLiquid decentralized exchange. T
 - **💾 Database Logging**: Complete trade history in local SQLite database
 - **⚙️ Environment Configuration**: Easy setup via `.env` file
 - **🔒 Risk Management**: Multiple layers of position and leverage protection
+- **🖥️ Web Dashboard**: Professional real-time monitoring interface with charts and controls
 
 ## 🎛️ AI Validation Modes
 
@@ -59,7 +60,21 @@ cp .env.example .env
 nano .env  # or use your preferred editor
 ```
 
-### 3. Required Configuration
+### 3. Start Trading Bot + Dashboard
+
+```bash
+# Option A: Complete system (Bot + Dashboard)
+python scripts/start_all.py
+
+# Option B: Just the trading bot
+python main.py
+
+# Option C: Just the dashboard
+cd dashboard && python start_server.py
+cd dashboard/frontend && npm run dev
+```
+
+### 4. Required Configuration
 
 #### 🔑 Essential API Keys
 
@@ -85,11 +100,92 @@ MAX_LEVERAGE=5                # 5x maximum leverage
 PRICE_GAP=0.25               # 0.25% minimum price difference
 ```
 
-### 4. Run the Bot
+### 5. Access Your Dashboard
+
+Once started, access the web interface:
+
+- **🖥️ Dashboard**: http://localhost:5173
+- **📊 API Documentation**: http://localhost:8000/api/docs
+- **🔍 Health Check**: http://localhost:8000/health
+
+### 6. Run the Bot
 
 ```bash
 python main.py
 ```
+
+## 🖥️ Web Dashboard Interface
+
+### Overview
+
+Professional web interface for real-time monitoring and control of your HyperLiquid AI Trading Bot. Built with FastAPI backend and React frontend for optimal performance.
+
+### Key Dashboard Features
+
+- **📊 Real-time Metrics**: Live account balance, P&L, positions, and AI prediction accuracy
+- **🤖 Bot Control**: Start, stop, restart your trading bot from the web interface
+- **📈 Performance Charts**: Interactive charts showing trading performance over time
+- **📋 Trade History**: Complete trade log with filtering and search capabilities
+- **🔔 Live Updates**: WebSocket-powered real-time data streaming
+- **📱 Mobile Responsive**: Full functionality on desktop, tablet, and mobile
+- **🌙 Dark/Light Theme**: Modern UI with automatic theme switching
+- **⚡ TailwindCSS v4.1**: Latest styling framework for optimal performance
+
+### Dashboard Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                 HyperLiquid Dashboard                    │
+├─────────────────┬─────────────────┬─────────────────────┤
+│   Trading Bot   │  FastAPI Backend │  React Frontend     │
+│   (main.py)     │    (Port 8000)   │   (Port 5173)       │
+│                 │                  │                     │
+│ ✓ AI Trading    │ ✓ WebSocket API  │ ✓ Real-time UI      │
+│ ✓ Risk Mgmt     │ ✓ Bot Controls   │ ✓ Interactive Charts│
+│ ✓ SQLite DB     │ ✓ Data Service   │ ✓ Mobile Ready      │
+│ ✓ Predictions   │ ✓ Health Checks  │ ✓ Modern Design     │
+└─────────────────┴─────────────────┴─────────────────────┘
+```
+
+### Quick Dashboard Setup
+
+```bash
+# Prerequisites (first time only)
+cd dashboard/frontend
+npm install
+
+# Start complete system
+python scripts/start_all.py
+
+# Or start components separately
+# Terminal 1: Backend
+cd dashboard && python start_server.py
+
+# Terminal 2: Frontend
+cd dashboard/frontend && npm run dev
+
+# Terminal 3: Trading Bot
+python main.py
+```
+
+### Dashboard URLs
+
+- **Main Dashboard**: http://localhost:5173
+- **API Documentation**: http://localhost:8000/api/docs
+- **WebSocket Endpoint**: ws://localhost:8000/ws
+- **Health Check**: http://localhost:8000/health
+
+### Dashboard Screenshots
+
+The dashboard provides:
+
+- **Bot Status Panel**: Control and monitor bot lifecycle
+- **Live Metrics Grid**: Real-time trading performance
+- **Performance Charts**: Visual analytics and trends
+- **Trade History Table**: Complete transaction log
+- **AI Insights**: Prediction accuracy and model performance
+
+📚 **Detailed Documentation**: See [Dashboard Guide](dashboard/README.md) for complete setup and usage instructions.
 
 ## 📋 Complete Configuration Guide
 
@@ -246,6 +342,52 @@ AlloraNetwork Prediction → Hyperbolic AI + OpenRouter → Consensus Required �
 - **Custom strategies**: Extensible strategy system
 - **Signal confirmation**: Multi-layer validation
 - **Market condition filters**: Volatility-based filtering
+
+## 🚀 Quick Commands Reference
+
+### System Management
+
+```bash
+# Complete System (Recommended)
+python scripts/start_all.py          # Start bot + dashboard
+
+# Individual Components
+python main.py                       # Trading bot only
+python scripts/start_dashboard.py    # Dashboard only
+python scripts/health_check.py       # System diagnostics
+
+# Dashboard Development
+cd dashboard/frontend && npm run dev  # Frontend dev server
+cd dashboard && python start_server.py  # Backend dev server
+```
+
+### First Time Setup
+
+```bash
+# 1. Install dependencies
+pip install -r requirements.txt
+cd dashboard/frontend && npm install
+
+# 2. Configure environment
+cp .env.example .env
+# Edit .env with your API keys
+
+# 3. Run health check
+python scripts/health_check.py
+
+# 4. Start everything
+python scripts/start_all.py
+```
+
+### Access Points
+
+Once running, access these URLs:
+
+- **🖥️ Main Dashboard**: http://localhost:5173
+- **📊 Trading Performance**: Real-time charts and metrics
+- **🤖 Bot Controls**: Start/stop/restart from web interface
+- **📋 Trade History**: Complete transaction log with filters
+- **🔧 API Documentation**: http://localhost:8000/api/docs
 
 ## 🔄 Future Roadmap
 
