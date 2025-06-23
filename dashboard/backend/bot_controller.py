@@ -17,7 +17,7 @@ import sys
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
-from config_manager import ConfigManager
+from dashboard.backend.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
 
@@ -49,8 +49,9 @@ class BotController:
     def get_status(self) -> Dict[str, Any]:
         """Get current bot status"""
         try:
+            # First check if we have a tracked process
             if self.bot_process and self.bot_process.poll() is None:
-                # Bot is running
+                # Bot is running (started by dashboard)
                 self.status_cache.update({
                     "status": "running",
                     "pid": self.bot_process.pid,
@@ -66,12 +67,21 @@ class BotController:
                 })
                 self.bot_process = None
             else:
-                # No bot process
-                self.status_cache.update({
-                    "status": "stopped",
-                    "pid": None,
-                    "last_updated": datetime.now().isoformat()
-                })
+                # No tracked process - check for existing bot processes
+                running_bot_pid = self._find_running_bot_process()
+                if running_bot_pid:
+                    self.status_cache.update({
+                        "status": "running",
+                        "pid": running_bot_pid,
+                        "last_updated": datetime.now().isoformat(),
+                        "external_process": True  # Flag to indicate we didn't start this
+                    })
+                else:
+                    self.status_cache.update({
+                        "status": "stopped",
+                        "pid": None,
+                        "last_updated": datetime.now().isoformat()
+                    })
                 
             return self.status_cache.copy()
             
@@ -83,15 +93,52 @@ class BotController:
                 "last_updated": datetime.now().isoformat()
             }
     
+    def _find_running_bot_process(self) -> Optional[int]:
+        """Find already-running bot processes (main.py)"""
+        try:
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'cwd']):
+                try:
+                    # Check if this is a Python process running main.py
+                    if proc.info['name'] and 'python' in proc.info['name'].lower():
+                        cmdline = proc.info['cmdline']
+                        if cmdline and any('main.py' in arg for arg in cmdline):
+                            # Get the working directory of the process
+                            cwd = proc.info.get('cwd', '')
+                            
+                            # Check if this is our bot's main.py by looking at:
+                            # 1. Working directory contains 'hyperLiquid-ia-bot'
+                            # 2. Full path contains our script path
+                            # 3. Command line contains main.py
+                            if (any('hyperLiquid-ia-bot' in str(arg) for arg in cmdline) or
+                                'hyperLiquid-ia-bot' in cwd or
+                                any(self.bot_script_path in str(arg) for arg in cmdline)):
+                                logger.info(f"Found existing bot process: PID {proc.info['pid']}")
+                                logger.info(f"Command line: {' '.join(cmdline)}")
+                                logger.info(f"Working directory: {cwd}")
+                                return proc.info['pid']
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    continue
+            
+            logger.info("No existing bot process found")
+            return None
+        except Exception as e:
+            logger.error(f"Error finding running bot process: {e}")
+            return None
+    
     async def start_bot(self) -> Dict[str, Any]:
         """Start the trading bot"""
         try:
             # Check if bot is already running
             current_status = self.get_status()
             if current_status["status"] == "running":
+                external_process = current_status.get("external_process", False)
+                pid = current_status.get("pid")
+                message = f"Bot is already running (PID: {pid})"
+                if external_process:
+                    message += " - started externally"
                 return {
                     "success": False,
-                    "message": "Bot is already running",
+                    "message": message,
                     "status": current_status
                 }
             
@@ -163,6 +210,34 @@ class BotController:
                     "message": "Bot is not running",
                     "status": current_status
                 }
+            
+            # Handle external processes
+            if not self.bot_process and current_status.get("external_process"):
+                # Try to stop external process by PID
+                pid = current_status.get("pid")
+                if pid:
+                    try:
+                        import psutil
+                        proc = psutil.Process(pid)
+                        proc.terminate()
+                        logger.info(f"Terminated external bot process: PID {pid}")
+                        return {
+                            "success": True,
+                            "message": f"External bot process stopped (PID: {pid})",
+                            "status": self.get_status()
+                        }
+                    except psutil.NoSuchProcess:
+                        return {
+                            "success": False,
+                            "message": "External bot process no longer exists",
+                            "status": current_status
+                        }
+                    except Exception as e:
+                        return {
+                            "success": False,
+                            "message": f"Failed to stop external bot process: {str(e)}",
+                            "status": current_status
+                        }
             
             if not self.bot_process:
                 return {
@@ -438,11 +513,10 @@ class BotController:
             return {
                 "success": True,
                 "data": {
-                    "bot_status": process_status["status"],
-                    "bot_mode": self.status_cache["mode"],
+                    "mode": self.status_cache["mode"],
                     "monitoring_enabled": self.status_cache["monitoring_enabled"],
                     "active_cryptos": active_cryptos,
-                    "active_crypto_count": len(active_cryptos),
+                    "status": process_status["status"],
                     "pid": process_status.get("pid"),
                     "uptime": process_status.get("uptime", 0),
                     "last_updated": datetime.now().isoformat()

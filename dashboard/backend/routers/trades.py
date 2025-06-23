@@ -24,6 +24,63 @@ async def get_data_service():
     await data_service.initialize()
     return data_service
 
+@router.get("")
+async def get_trades(
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(10, ge=1, le=100, description="Number of trades per page"),
+    sort_by: str = Query("timestamp", description="Sort field"),
+    sort_order: str = Query("desc", description="Sort order: asc or desc"),
+    symbol: Optional[str] = Query(None, description="Filter by symbol"),
+    side: Optional[str] = Query(None, description="Filter by side (buy/sell)"),
+    data_service: DataService = Depends(get_data_service)
+):
+    """Get trades with pagination - main endpoint for frontend"""
+    try:
+        # Calculate offset from page
+        offset = (page - 1) * limit
+        
+        # Get recent trades (basic implementation)
+        trades = await data_service.get_recent_trades(limit=500)  # Get more for filtering
+        
+        # Apply filters
+        if symbol:
+            trades = [t for t in trades if t["coin"].upper() == symbol.upper()]
+        
+        if side:
+            trades = [t for t in trades if t["side"].upper() == side.upper()]
+        
+        # Sort trades
+        reverse_sort = sort_order.lower() == "desc"
+        if sort_by == "timestamp":
+            trades.sort(key=lambda x: x.get("timestamp", ""), reverse=reverse_sort)
+        elif sort_by == "pnl":
+            trades.sort(key=lambda x: x.get("pnl", 0), reverse=reverse_sort)
+        elif sort_by == "size":
+            trades.sort(key=lambda x: x.get("size", 0), reverse=reverse_sort)
+        
+        # Apply pagination
+        total_count = len(trades)
+        paginated_trades = trades[offset:offset + limit]
+        
+        return {
+            "success": True,
+            "data": {
+                "trades": paginated_trades,
+                "pagination": {
+                    "page": page,
+                    "limit": limit,
+                    "total_pages": (total_count + limit - 1) // limit,
+                    "total_count": total_count,
+                    "has_next": offset + limit < total_count,
+                    "has_prev": page > 1
+                }
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting trades: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/history")
 async def get_trade_history(
     limit: int = Query(50, ge=1, le=500, description="Number of trades to retrieve"),

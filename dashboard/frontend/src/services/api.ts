@@ -6,6 +6,7 @@ import type {
   Trade,
   Position,
   BotStatus,
+  BotModeStatus,
   PerformanceMetrics,
   DashboardMetrics,
   SearchParams,
@@ -84,7 +85,7 @@ class ApiService {
   }
 
   async restartBot(): Promise<ApiResponse<{ message: string }>> {
-    const response = await this.client.post("/api/bot/restart");
+    const response = await this.client.post("/api/bot-control/restart");
     return response.data;
   }
 
@@ -309,6 +310,28 @@ class ApiService {
 
   async getCompatibilityCheck(): Promise<ApiResponse<CryptoCompatibility>> {
     const response = await this.client.get("/api/crypto/compatibility");
+    return response.data;
+  }
+
+  // Bot Mode Control Methods (STANDBY/ACTIVE)
+  async startMonitoring(): Promise<
+    ApiResponse<{ message: string; status: BotModeStatus }>
+  > {
+    const response = await this.client.post(
+      "/api/bot-control/start-monitoring"
+    );
+    return response.data;
+  }
+
+  async setStandbyMode(): Promise<
+    ApiResponse<{ message: string; status: BotModeStatus }>
+  > {
+    const response = await this.client.post("/api/bot-control/set-standby");
+    return response.data;
+  }
+
+  async getBotModeStatus(): Promise<ApiResponse<BotModeStatus>> {
+    const response = await this.client.get("/api/bot-control/mode-status");
     return response.data;
   }
 

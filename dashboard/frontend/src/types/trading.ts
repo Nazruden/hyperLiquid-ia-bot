@@ -32,11 +32,19 @@ export interface BotStatus {
   active_positions: number;
   balance: number;
   errors: string[];
+  pid?: number;
   system_resources: {
     cpu_percent: number;
     memory_percent: number;
     disk_usage: number;
   };
+}
+
+export interface BotModeStatus {
+  mode: "STANDBY" | "ACTIVE";
+  monitoring_enabled: boolean;
+  active_cryptos: Record<string, number>;
+  status: string;
 }
 
 export interface PerformanceMetrics {

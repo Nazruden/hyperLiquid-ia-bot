@@ -47,15 +47,27 @@ class TestnetOrchestrator:
             env.update(env_vars)
             
         try:
-            process = subprocess.Popen(
-                command,
-                cwd=cwd or self.root_dir,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                env=env,
-                shell=True if isinstance(command, str) else False
-            )
+            # ✅ FIX: Don't redirect output for any long-running services to prevent buffer overflow
+            if name in ["Trading Bot", "Dashboard Backend", "Dashboard Frontend"]:
+                # Let long-running services output go to console directly
+                process = subprocess.Popen(
+                    command,
+                    cwd=cwd or self.root_dir,
+                    text=True,
+                    env=env,
+                    shell=True if isinstance(command, str) else False
+                )
+            else:
+                # Only short-running services (like npm install) can have redirected output
+                process = subprocess.Popen(
+                    command,
+                    cwd=cwd or self.root_dir,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    env=env,
+                    shell=True if isinstance(command, str) else False
+                )
             
             self.processes[name] = process
             self.log(f"✅ {name} started (PID: {process.pid})")
@@ -99,7 +111,8 @@ class TestnetOrchestrator:
             "dashboard.backend.app:app",
             "--host", "127.0.0.1",
             "--port", "8000",
-            "--log-level", "info"
+            "--log-level", "debug",  # ✅ Increase log level for debugging
+            "--access-log",  # ✅ Enable access logging
         ]
         process = self.start_service("Dashboard Backend", backend_cmd)
         
@@ -160,15 +173,51 @@ class TestnetOrchestrator:
         while self.running:
             for name, process in list(self.processes.items()):
                 if process.poll() is not None:  # Process has terminated
-                    self.log(f"⚠️ {name} has stopped unexpectedly", "WARNING")
+                    exit_code = process.returncode
                     
-                    # Try to restart critical services
-                    if name == "Trading Bot":
-                        self.log("🔄 Restarting Trading Bot...")
-                        self.start_trading_bot()
-                    elif name == "Dashboard Backend":
-                        self.log("🔄 Restarting Dashboard Backend...")
-                        self.start_dashboard_backend()
+                    # ✅ FIX: Don't restart short-running tasks that completed successfully
+                    if name == "NPM Install":
+                        if exit_code == 0:
+                            self.log(f"✅ {name} completed successfully")
+                        else:
+                            self.log(f"❌ {name} failed with exit code: {exit_code}", "ERROR")
+                        # Remove from processes list - don't restart
+                        del self.processes[name]
+                        continue
+                    
+                    # ✅ Only restart long-running services that stopped unexpectedly
+                    if name in ["Trading Bot", "Dashboard Backend", "Dashboard Frontend"]:
+                        self.log(f"⚠️ {name} has stopped unexpectedly (exit code: {exit_code})", "WARNING")
+                        
+                        # ✅ Enhanced debugging: Log stderr/stdout if available
+                        if hasattr(process, 'stderr') and process.stderr:
+                            try:
+                                stderr_output = process.stderr.read()
+                                if stderr_output:
+                                    self.log(f"🔴 {name} stderr: {stderr_output[:500]}", "ERROR")
+                            except:
+                                pass
+                        
+                        # ✅ Don't restart too aggressively for Dashboard Backend
+                        if name == "Dashboard Backend":
+                            # Check if we've restarted too many times recently
+                            restart_count = getattr(self, f"{name}_restart_count", 0)
+                            if restart_count >= 5:
+                                self.log(f"❌ {name} failed too many times, stopping auto-restart", "ERROR")
+                                del self.processes[name]
+                                continue
+                            setattr(self, f"{name}_restart_count", restart_count + 1)
+                            
+                            self.log(f"🔄 Restarting {name} (attempt {restart_count + 1}/5)...")
+                            time.sleep(2)  # Brief delay before restart
+                            self.start_dashboard_backend()
+                        elif name == "Trading Bot":
+                            self.log("🔄 Restarting Trading Bot...")
+                            self.start_trading_bot()
+                    else:
+                        # Unknown service - just log and remove
+                        self.log(f"ℹ️ {name} stopped (exit code: {exit_code})")
+                        del self.processes[name]
                         
             time.sleep(5)  # Check every 5 seconds
             

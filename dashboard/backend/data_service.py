@@ -14,6 +14,8 @@ import sys
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
+from dashboard.backend.bot_controller import BotController
+
 logger = logging.getLogger(__name__)
 
 class DataService:
@@ -26,6 +28,9 @@ class DataService:
         )
         self.cache = {}
         self.cache_timeout = 30  # Cache timeout in seconds
+        
+        # Initialize bot controller for status information
+        self.bot_controller = BotController()
     
     async def initialize(self):
         """Initialize the data service"""
@@ -108,12 +113,11 @@ class DataService:
             return self.cache[cache_key]["data"]
         
         try:
+            # Get real bot status from bot controller
+            bot_status = self.bot_controller.get_status()
+            
             snapshot = {
-                "bot_status": {
-                    "status": "unknown",
-                    "uptime": 0,
-                    "last_updated": datetime.now().isoformat()
-                },
+                "bot_status": bot_status,
                 "trading_summary": await self.get_trading_summary(),
                 "recent_trades": await self.get_recent_trades(limit=10),
                 "current_positions": await self.get_current_positions(),

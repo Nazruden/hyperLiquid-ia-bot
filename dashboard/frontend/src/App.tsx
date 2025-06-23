@@ -1,11 +1,14 @@
 import Dashboard from "./components/Dashboard";
 import { ThemeProvider } from "./components/ThemeProvider";
+import ErrorBoundary from "./components/ErrorBoundary";
 
 function App() {
   return (
-    <ThemeProvider>
-      <Dashboard />
-    </ThemeProvider>
+    <ErrorBoundary>
+      <ThemeProvider>
+        <Dashboard />
+      </ThemeProvider>
+    </ErrorBoundary>
   );
 }
 

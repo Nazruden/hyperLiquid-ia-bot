@@ -65,8 +65,6 @@ class SystemLauncher:
             process = subprocess.Popen(
                 [sys.executable, "main.py"],
                 cwd=self.root_dir,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
                 universal_newlines=True
             )
             self.processes.append(("Trading Bot", process))

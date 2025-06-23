@@ -54,7 +54,7 @@ bot_controller = BotController()
 data_service = DataService()
 
 # Include API routers
-app.include_router(bot_control.router, prefix="/api/bot", tags=["Bot Control"])
+app.include_router(bot_control.router, prefix="/api/bot-control", tags=["Bot Control"])
 app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"])
 app.include_router(trades.router, prefix="/api/trades", tags=["Trades"])
 app.include_router(crypto_config.router, tags=["Crypto Configuration"])
@@ -93,9 +93,10 @@ async def root():
         "endpoints": {
             "health": "/health",
             "websocket": "/ws",
-            "bot_control": "/api/bot",
+            "bot_control": "/api/bot-control",
             "analytics": "/api/analytics",
             "trades": "/api/trades",
+            "crypto_config": "/api/crypto",
             "docs": "/api/docs"
         }
     }

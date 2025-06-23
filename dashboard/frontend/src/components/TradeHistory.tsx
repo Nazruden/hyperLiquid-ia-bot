@@ -34,13 +34,21 @@ const TradeHistory: React.FC<TradeHistoryProps> = ({
         sort_order: "desc",
       });
 
-      if (response.success) {
-        setTrades(response.data.data);
-        setTotalPages(Math.ceil(response.data.total / limit));
+      if (response.success && response.data) {
+        // Ensure we always have an array, even if response.data.data is undefined/null
+        const tradesData = Array.isArray(response.data.data)
+          ? response.data.data
+          : [];
+        setTrades(tradesData);
+        setTotalPages(Math.ceil((response.data.total || 0) / limit));
       } else {
+        // Set empty array on failure to prevent undefined errors
+        setTrades([]);
         setError(response.error || "Failed to load trades");
       }
     } catch (err) {
+      // Set empty array on exception to prevent undefined errors
+      setTrades([]);
       const errorMessage = apiService.handleApiError(err);
       setError(errorMessage);
     } finally {
@@ -120,7 +128,10 @@ const TradeHistory: React.FC<TradeHistoryProps> = ({
     );
   }
 
-  if (trades.length === 0) {
+  // Ensure trades is always an array
+  const safeTrades = Array.isArray(trades) ? trades : [];
+
+  if (safeTrades.length === 0) {
     return (
       <div className="text-center py-8">
         <Clock className="w-12 h-12 text-gray-400 mx-auto mb-4" />
@@ -132,7 +143,7 @@ const TradeHistory: React.FC<TradeHistoryProps> = ({
   return (
     <div>
       <div className="space-y-2">
-        {trades.map((trade) => (
+        {safeTrades.map((trade) => (
           <div
             key={trade.id}
             className="flex items-center justify-between p-3 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors duration-200"
@@ -191,7 +202,7 @@ const TradeHistory: React.FC<TradeHistoryProps> = ({
       {showPagination && totalPages > 1 && (
         <div className="flex items-center justify-between mt-6">
           <div className="text-sm text-gray-500">
-            Showing {trades.length} of {totalPages * limit} trades
+            Showing {safeTrades.length} of {totalPages * limit} trades
           </div>
           <div className="flex space-x-2">
             <button
