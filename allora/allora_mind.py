@@ -7,6 +7,7 @@ from utils.constants import ALLORA_API_BASE_URL
 from database.db_manager import DatabaseManager
 from strategy.hyperbolic_reviewer import HyperbolicReviewer
 from strategy.openrouter_reviewer import OpenRouterReviewer
+from strategy.adaptive_thresholds import AdaptiveThresholdCalculator
 
 
 class AlloraMind:
@@ -29,6 +30,9 @@ class AlloraMind:
         self.hyperbolic_reviewer = HyperbolicReviewer(hyperbolic_api_key) if hyperbolic_api_key else None
         self.openrouter_reviewer = OpenRouterReviewer(openrouter_api_key, openrouter_model) if openrouter_api_key else None
         
+        # Initialize adaptive threshold calculator
+        self.adaptive_threshold_calculator = AdaptiveThresholdCalculator()
+        
         # Validate at least one AI service is available
         if not self.hyperbolic_reviewer and not self.openrouter_reviewer:
             raise ValueError("At least one AI validation service must be configured (Hyperbolic or OpenRouter)")
@@ -40,6 +44,7 @@ class AlloraMind:
         if self.openrouter_reviewer:
             active_services.append("OpenRouter AI")
         print(f"AI Validation Services: {', '.join(active_services)}")
+        print(f"Adaptive Thresholds: {'Enabled' if os.getenv('ADAPTIVE_THRESHOLDS', 'True').lower() == 'true' else 'Disabled'}")
 
     def set_topic_ids(self, topic_ids):
         """
@@ -102,25 +107,32 @@ class AlloraMind:
         
         return final_score
 
-    def get_adaptive_threshold(self, volatility=None):
+    def get_adaptive_threshold(self, volatility=None, token=None, market_condition='NORMAL'):
         """
-        Calcule le seuil adaptatif selon volatilité
+        Calcule le seuil adaptatif selon volatilité, performance historique et conditions marché
         """
-        base_threshold = float(os.getenv('VALIDATION_SCORE_THRESHOLD', '0.5'))
+        # Utiliser l'ancien système si ADAPTIVE_THRESHOLDS est désactivé
+        if os.getenv('ADAPTIVE_THRESHOLDS', 'True').lower() == 'false':
+            base_threshold = float(os.getenv('VALIDATION_SCORE_THRESHOLD', '0.5'))
+            if not volatility:
+                return base_threshold
+            
+            # Ancien système simple
+            if volatility < 0.015:
+                return min(0.75, base_threshold + 0.2)
+            elif volatility > 0.04:
+                return max(0.3, base_threshold - 0.2)
+            else:
+                factor = (volatility - 0.015) / (0.04 - 0.015)
+                adjustment = 0.2 - (factor * 0.4)
+                return base_threshold + adjustment
         
-        if not volatility:
-            return base_threshold
-        
-        # Seuils adaptatifs selon volatilité
-        if volatility < 0.015:  # Marché calme - plus strict
-            return min(0.75, base_threshold + 0.2)
-        elif volatility > 0.04:  # Haute volatilité - plus permissif
-            return max(0.3, base_threshold - 0.2)
-        else:
-            # Interpolation linéaire
-            factor = (volatility - 0.015) / (0.04 - 0.015)
-            adjustment = 0.2 - (factor * 0.4)
-            return base_threshold + adjustment
+        # Nouveau système adaptatif avancé
+        return self.adaptive_threshold_calculator.get_threshold(
+            volatility=volatility,
+            token=token,
+            market_condition=market_condition
+        )
 
     def get_inference_ai_model(self, topic_id):
         url = f'{self.base_url}ethereum-11155111?allora_topic_id={topic_id}'
@@ -230,9 +242,9 @@ class AlloraMind:
             if hasattr(self.manager, 'get_volatility'):
                 current_volatility = self.manager.get_volatility(token)
 
-            # NEW: Calculate weighted validation score
+            # NEW: Calculate weighted validation score with token context
             validation_score = self.calculate_validation_score(hyperbolic_review, openrouter_review, current_volatility)
-            adaptive_threshold = self.get_adaptive_threshold(current_volatility)
+            adaptive_threshold = self.get_adaptive_threshold(current_volatility, token=token, market_condition='NORMAL')
 
             # Log individual validator results with new system
             if hyperbolic_review:

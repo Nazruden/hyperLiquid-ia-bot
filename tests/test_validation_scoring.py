@@ -124,7 +124,7 @@ class TestValidationScoring(unittest.TestCase):
         
         # Marché volatil = plus permissif (seuil plus bas)
         self.assertLess(threshold, 0.4)  # Plus permissif que base
-        self.assertGreaterEqual(threshold, 0.3)  # Plancher
+        self.assertGreaterEqual(threshold, 0.25)  # Plancher système (Sprint 1.2)
     
     def test_adaptive_threshold_medium_volatility(self):
         """Test seuil adaptatif avec volatilité moyenne"""

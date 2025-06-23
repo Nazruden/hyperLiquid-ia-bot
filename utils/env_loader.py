@@ -59,7 +59,12 @@ class EnvLoader:
             "volatility_threshold_low": float(os.getenv('VOLATILITY_THRESHOLD_LOW', '0.015')),
             "volatility_threshold_high": float(os.getenv('VOLATILITY_THRESHOLD_HIGH', '0.04')),
             "hyperbolic_base_weight": float(os.getenv('HYPERBOLIC_BASE_WEIGHT', '0.6')),
-            "openrouter_base_weight": float(os.getenv('OPENROUTER_BASE_WEIGHT', '0.4'))
+            "openrouter_base_weight": float(os.getenv('OPENROUTER_BASE_WEIGHT', '0.4')),
+            # Sprint 1.2: Adaptive thresholds avancés  
+            "adaptive_min_threshold": float(os.getenv('ADAPTIVE_MIN_THRESHOLD', '0.25')),
+            "adaptive_max_threshold": float(os.getenv('ADAPTIVE_MAX_THRESHOLD', '0.85')),
+            "historical_performance_weight": float(os.getenv('HISTORICAL_PERFORMANCE_WEIGHT', '0.05')),
+            "market_condition_weight": float(os.getenv('MARKET_CONDITION_WEIGHT', '0.03'))
         }
         
         return config
