@@ -52,7 +52,14 @@ class EnvLoader:
                 "ETH": int(os.getenv('ETH_TOPIC_ID', '13'))
             },
             "openrouter_api_key": os.getenv('OPENROUTER_API_KEY'),
-            "openrouter_model": os.getenv('OPENROUTER_MODEL', 'anthropic/claude-3-sonnet')
+            "openrouter_model": os.getenv('OPENROUTER_MODEL', 'anthropic/claude-3-sonnet'),
+            # Sprint 1.1: Nouvelle logique de validation adaptative
+            "validation_score_threshold": float(os.getenv('VALIDATION_SCORE_THRESHOLD', '0.5')),
+            "adaptive_thresholds": os.getenv('ADAPTIVE_THRESHOLDS', 'True').lower() == 'true',
+            "volatility_threshold_low": float(os.getenv('VOLATILITY_THRESHOLD_LOW', '0.015')),
+            "volatility_threshold_high": float(os.getenv('VOLATILITY_THRESHOLD_HIGH', '0.04')),
+            "hyperbolic_base_weight": float(os.getenv('HYPERBOLIC_BASE_WEIGHT', '0.6')),
+            "openrouter_base_weight": float(os.getenv('OPENROUTER_BASE_WEIGHT', '0.4'))
         }
         
         return config

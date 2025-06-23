@@ -1,6 +1,5 @@
 import requests
 import time
-import os
 from utils.helpers import round_price
 from strategy.custom_strategy import custom_strategy
 from utils.constants import ALLORA_API_BASE_URL
@@ -47,80 +46,6 @@ class AlloraMind:
         :param topic_ids: Dictionary mapping tokens to topic IDs.
         """
         self.topic_ids = topic_ids
-
-    def get_dynamic_weights(self, volatility):
-        """
-        Calcule les poids dynamiques selon volatilité et performance historique
-        """
-        # Valeurs par défaut basées sur l'analyse
-        base_weights = {
-            'hyperbolic': float(os.getenv('HYPERBOLIC_BASE_WEIGHT', '0.6')),
-            'openrouter': float(os.getenv('OPENROUTER_BASE_WEIGHT', '0.4'))
-        }
-        
-        # Ajustement selon volatilité (haute volatilité favorise OpenRouter d'après tests)
-        if volatility and volatility > 0.03:  # Haute volatilité
-            return {
-                'hyperbolic': 0.4,
-                'openrouter': 0.6
-            }
-        
-        return base_weights
-
-    def calculate_validation_score(self, hyperbolic_review, openrouter_review, volatility=None):
-        """
-        Calcule un score de validation pondéré dynamique (0.0-1.0)
-        """
-        weights = self.get_dynamic_weights(volatility)
-        total_score = 0
-        total_weight = 0
-        
-        # Score Hyperbolic
-        if hyperbolic_review and self.hyperbolic_reviewer:
-            confidence_factor = hyperbolic_review.get('confidence', 0) / 100
-            approval_factor = 1 if hyperbolic_review.get('approval', False) else 0
-            risk_factor = max(0, (10 - hyperbolic_review.get('risk_score', 5)) / 10)  # Inverse risk
-            
-            score = (confidence_factor * approval_factor * risk_factor)
-            total_score += score * weights['hyperbolic']
-            total_weight += weights['hyperbolic']
-        
-        # Score OpenRouter
-        if openrouter_review and self.openrouter_reviewer:
-            confidence_factor = openrouter_review.get('confidence', 0) / 100
-            approval_factor = 1 if openrouter_review.get('approval', False) else 0
-            risk_factor = max(0, (10 - openrouter_review.get('risk_score', 5)) / 10)
-            
-            score = (confidence_factor * approval_factor * risk_factor)
-            total_score += score * weights['openrouter']
-            total_weight += weights['openrouter']
-        
-        final_score = total_score / total_weight if total_weight > 0 else 0
-        
-        # Log pour debug
-        print(f"Validation Score: {final_score:.3f} (Hyperbolic: {weights.get('hyperbolic', 0):.1f}, OpenRouter: {weights.get('openrouter', 0):.1f})")
-        
-        return final_score
-
-    def get_adaptive_threshold(self, volatility=None):
-        """
-        Calcule le seuil adaptatif selon volatilité
-        """
-        base_threshold = float(os.getenv('VALIDATION_SCORE_THRESHOLD', '0.5'))
-        
-        if not volatility:
-            return base_threshold
-        
-        # Seuils adaptatifs selon volatilité
-        if volatility < 0.015:  # Marché calme - plus strict
-            return min(0.75, base_threshold + 0.2)
-        elif volatility > 0.04:  # Haute volatilité - plus permissif
-            return max(0.3, base_threshold - 0.2)
-        else:
-            # Interpolation linéaire
-            factor = (volatility - 0.015) / (0.04 - 0.015)
-            adjustment = 0.2 - (factor * 0.4)
-            return base_threshold + adjustment
 
     def get_inference_ai_model(self, topic_id):
         url = f'{self.base_url}ethereum-11155111?allora_topic_id={topic_id}'
@@ -225,16 +150,11 @@ class AlloraMind:
                 print("Both AI reviews failed: No response received.")
                 continue
 
-            # Calculate volatility for adaptive scoring
-            current_volatility = None
-            if hasattr(self.manager, 'get_volatility'):
-                current_volatility = self.manager.get_volatility(token)
-
-            # NEW: Calculate weighted validation score
-            validation_score = self.calculate_validation_score(hyperbolic_review, openrouter_review, current_volatility)
-            adaptive_threshold = self.get_adaptive_threshold(current_volatility)
-
-            # Log individual validator results with new system
+            # Both validators must approve for trade execution (AND logic)
+            hyperbolic_approves = hyperbolic_review and hyperbolic_review['approval'] and hyperbolic_review['confidence'] > 70 if hyperbolic_review else False
+            openrouter_approves = openrouter_review and openrouter_review['approval'] and openrouter_review['confidence'] > 70 if openrouter_review else False
+            
+            # Log individual validator results
             if hyperbolic_review:
                 print(f"Hyperbolic AI - Approval: {hyperbolic_review['approval']}, Confidence: {hyperbolic_review['confidence']}%")
             else:
@@ -245,12 +165,17 @@ class AlloraMind:
             else:
                 print("OpenRouter AI - No response")
 
-            # NEW: Validation decision based on adaptive scoring
-            validation_mode = f"Adaptive Scoring (threshold: {adaptive_threshold:.3f}, score: {validation_score:.3f})"
-            both_approve = validation_score >= adaptive_threshold
-
+            # Adaptive validation logic based on available services
+            if self.hyperbolic_reviewer and self.openrouter_reviewer:
+                # Both services available - require consensus (AND logic)
+                both_approve = hyperbolic_approves and openrouter_approves
+                validation_mode = "Consensus (both AI services must approve)"
+            else:
+                # Single service available - use OR logic
+                both_approve = hyperbolic_approves or openrouter_approves
+                validation_mode = "Single AI service validation"
+            
             print(f"Validation Mode: {validation_mode}")
-            print(f"Volatility: {current_volatility:.4f}" if current_volatility else "Volatility: N/A")
             
             if both_approve:
                 # Continue with existing trade execution logic
@@ -290,13 +215,12 @@ class AlloraMind:
                                                           loss_target=stop_loss)
                     print(res)
             else:
-                print(f"Trade rejected by AI scoring system:")
-                print(f"Validation score {validation_score:.3f} below threshold {adaptive_threshold:.3f}")
-                if hyperbolic_review:
-                    print(f"Hyperbolic AI - Confidence: {hyperbolic_review['confidence']}%, Risk Score: {hyperbolic_review['risk_score']}/10")
+                print("Trade rejected by AI consensus:")
+                if hyperbolic_review and not hyperbolic_approves:
+                    print(f"Hyperbolic AI rejection - Confidence: {hyperbolic_review['confidence']}%, Risk Score: {hyperbolic_review['risk_score']}/10")
                     print(f"Reasoning: {hyperbolic_review['reasoning']}")
-                if openrouter_review:
-                    print(f"OpenRouter AI - Confidence: {openrouter_review['confidence']}%, Risk Score: {openrouter_review['risk_score']}/10")
+                if openrouter_review and not openrouter_approves:
+                    print(f"OpenRouter AI rejection - Confidence: {openrouter_review['confidence']}%, Risk Score: {openrouter_review['risk_score']}/10")
                     print(f"Reasoning: {openrouter_review['reasoning']}")
                 return
 
