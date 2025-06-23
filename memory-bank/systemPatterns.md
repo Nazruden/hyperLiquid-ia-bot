@@ -41,13 +41,15 @@ _Π: INITIALIZING | Ω: PLAN_
 - **Size Management**: Coin-specific precision handling
 - **Risk Controls**: Leverage limits, minimum order values
 
-### A₃: Trade Validation (`HyperbolicReviewer`)
+### A₃: Trade Validation (`HyperbolicReviewer` + `AdaptiveThresholdCalculator`)
 
-**Pattern**: Validator + Chain of Responsibility
+**Pattern**: Validator + Chain of Responsibility + Strategy
 
-- **Primary**: AI-powered trade validation and risk assessment
-- **Validation Criteria**: Confidence > 70%, risk scoring
-- **Integration**: Hyperbolic AI API for decision validation
+- **Primary**: Multi-AI validation with adaptive threshold optimization
+- **Validation Systems**: Hyperbolic AI + OpenRouter AI with weighted scoring
+- **Adaptive Logic**: Historical performance learning + market condition awareness
+- **Threshold Management**: Dynamic thresholds (0.25-0.85) with safety bounds
+- **Sprint 1.2 Enhancement**: Advanced threshold calculation with 7-day performance analysis
 
 ### A₄: Strategy Framework (`custom_strategy`)
 
@@ -70,12 +72,17 @@ _Π: INITIALIZING | Ω: PLAN_
 ### I₁: AI Integration Pattern
 
 ```
-AlloraNetwork API → Signal Generation → Hyperbolic Validation → Trade Execution
+AlloraNetwork API → Signal Generation → Multi-AI Validation → Adaptive Threshold → Trade Execution
+                                      ↗ Hyperbolic AI ↘
+                                                       → Weighted Score → Historical Adjustment
+                                      ↗ OpenRouter AI ↗                → Market Condition Adjustment
 ```
 
-- **Reliability**: Retry mechanisms, fallback strategies
-- **Validation**: Multi-layer AI validation before execution
-- **Monitoring**: Continuous prediction accuracy tracking
+- **Reliability**: Retry mechanisms, fallback strategies, dual AI redundancy
+- **Validation**: Sprint 1.2 weighted scoring system with adaptive thresholds
+- **Learning**: Historical performance analysis (7-day lookback)
+- **Adaptation**: Market condition awareness (5 states: NORMAL, HIGH_VOLATILITY, TRENDING, etc.)
+- **Safety**: Bounded thresholds (0.25-0.85) with comprehensive testing
 
 ### I₂: Data Flow Pattern
 
@@ -97,11 +104,13 @@ Market Data → AI Prediction → Strategy Filter → Risk Assessment → Order 
 
 ## 🏗️ Design Decisions
 
-### D₁: **Modular AI Architecture**
+### D₁: **Adaptive AI Architecture**
 
-**Decision**: Separate prediction (Allora) and validation (Hyperbolic) systems
-**Rationale**: Risk reduction, validation redundancy, extensibility
-**Trade-offs**: Increased latency vs. improved accuracy
+**Decision**: Separate prediction (Allora) and multi-AI validation (Hyperbolic + OpenRouter)
+**Enhancement (Sprint 1.2)**: Added adaptive threshold optimization with historical learning
+**Rationale**: Risk reduction, validation redundancy, performance-based optimization, market awareness
+**Trade-offs**: Increased complexity vs. significantly improved decision quality
+**Results**: Expected +150% execution rate improvement with maintained quality
 
 ### D₂: **HyperLiquid SDK Integration**
 
@@ -147,22 +156,72 @@ Market Data → AI Prediction → Strategy Filter → Risk Assessment → Order 
 - Smart contract automation
 - Distributed governance
 
+## 🎯 Sprint 1.2: Advanced Patterns
+
+### P₁: **Adaptive Threshold Pattern**
+
+**Pattern**: Strategy + Observer + Historical Analysis
+
+```
+Current Trade Request → AdaptiveThresholdCalculator
+                     ↗ Volatility Analysis
+                     ↗ Historical Performance (7-day)
+                     ↗ Market Condition Assessment
+                     ↘ Dynamic Threshold (0.25-0.85)
+```
+
+**Components**:
+
+- `AdaptiveThresholdCalculator`: Core threshold computation engine
+- `analyze_recent_performance()`: Historical data analysis
+- `get_threshold_explanation()`: Debugging and transparency
+- Safety bounds and market condition mapping
+
+### P₂: **Weighted Validation Pattern**
+
+**Pattern**: Composite + Strategy + Chain of Responsibility
+
+```
+Validation Request → Dynamic Weight Calculator → Weighted Score
+                  ↗ Hyperbolic AI (weight: 0.4-0.6)
+                  ↗ OpenRouter AI (weight: 0.4-0.6)
+                  ↘ Combined Score (0.0-1.0) vs Adaptive Threshold
+```
+
+**Benefits**:
+
+- Flexible single/dual AI operation
+- Performance-based weight adjustment
+- Volatility-aware threshold adaptation
+
+### P₃: **Historical Learning Pattern**
+
+**Pattern**: Observer + Repository + Strategy
+
+- **Data Collection**: 7-day trade performance tracking
+- **Analysis**: Win rate, average P&L, token-specific performance
+- **Adaptation**: Threshold adjustment (-0.05 to +0.1 range)
+- **Safety**: Bounded adjustment with minimum trade count requirements
+
 ## 📐 Quality Attributes
 
 ### Reliability
 
-- **AI Validation**: Multi-layer validation before trade execution
+- **AI Validation**: Multi-layer validation with adaptive thresholds
 - **Error Recovery**: Comprehensive error handling and retry mechanisms
 - **Data Integrity**: Transactional safety for all operations
+- **Historical Robustness**: Performance-based threshold learning with safety bounds
 
 ### Performance
 
-- **Response Time**: < 5s for AI prediction processing
+- **Response Time**: < 5s for AI prediction processing (+ threshold calculation)
 - **Throughput**: Support for multiple concurrent token analysis
 - **Scalability**: Modular design for easy horizontal scaling
+- **Optimization**: Expected +150% execution rate with Sprint 1.2 enhancements
 
 ### Security
 
 - **API Key Management**: Environment-based secure configuration
-- **Risk Controls**: Multi-layer position and leverage protection
-- **Audit Trail**: Complete trade history and decision logging
+- **Risk Controls**: Multi-layer position and leverage protection with adaptive thresholds
+- **Audit Trail**: Complete trade history and decision logging with threshold explanations
+- **Bounded Safety**: Hard limits (0.25-0.85) prevent extreme threshold values

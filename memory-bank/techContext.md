@@ -50,7 +50,16 @@ wheel==0.42.0                # Package distribution
 - **Integration**: REST API for trade decision validation
 - **Response**: Confidence scores, risk assessment, reasoning
 
-#### A₃: HyperLiquid Exchange
+#### A₃: OpenRouter AI
+
+- **Purpose**: Secondary AI validation for trade decisions
+- **Models**: Support for multiple models including:
+  - `anthropic/claude-3-sonnet`
+  - `openai/gpt-4`
+- **Integration**: REST API with OpenAI-compatible interface
+- **Sprint 1.2**: Integrated with weighted validation scoring system
+
+#### A₄: HyperLiquid Exchange
 
 - **SDK**: `hyperliquid-python-sdk==0.9.0`
 - **Functions**: Trading, position management, market data
@@ -80,9 +89,11 @@ allora/
 
 ```
 strategy/
-├── custom_strategy.py      # Extensible strategy implementation
-├── hyperbolic_reviewer.py  # AI-powered trade validation
-└── volatility_strategy.py  # Volatility-based trading logic
+├── custom_strategy.py        # Extensible strategy implementation
+├── hyperbolic_reviewer.py    # AI-powered trade validation
+├── openrouter_reviewer.py    # OpenRouter AI validation
+├── adaptive_thresholds.py    # Sprint 1.2: Advanced threshold optimization
+└── volatility_strategy.py    # Volatility-based trading logic
 ```
 
 ### C₄: Data & Analytics
@@ -119,6 +130,8 @@ HYPERLIQUID_BASE_URL=<api_endpoint>
 # AI Service APIs
 ALLORA_UPSHOT_KEY=<allora_api_key>
 HYPERBOLIC_API_KEY=<hyperbolic_api_key>
+OPENROUTER_API_KEY=<openrouter_api_key>
+OPENROUTER_MODEL=<model_name>
 
 # Trading Parameters
 ALLOWED_AMOUNT_PER_TRADE=<usd_amount>
@@ -129,6 +142,20 @@ CHECK_FOR_TRADES_INTERVAL=<seconds>
 # AlloraNetwork Topic Mapping
 ALLORA_TOPICS=<json_mapping>
 # Example: {"BTC": "topic_id_1", "ETH": "topic_id_2"}
+
+# Sprint 1.1 & 1.2: Advanced Validation Configuration
+VALIDATION_SCORE_THRESHOLD=<float>         # Base validation threshold (0.0-1.0)
+ADAPTIVE_THRESHOLDS=<boolean>              # Enable adaptive threshold system
+HYPERBOLIC_BASE_WEIGHT=<float>             # Hyperbolic AI weight (0.0-1.0)
+OPENROUTER_BASE_WEIGHT=<float>             # OpenRouter AI weight (0.0-1.0)
+VOLATILITY_THRESHOLD_LOW=<float>           # Low volatility threshold
+VOLATILITY_THRESHOLD_HIGH=<float>          # High volatility threshold
+
+# Sprint 1.2: Advanced Adaptive Thresholds
+ADAPTIVE_MIN_THRESHOLD=<float>             # Minimum threshold bound (0.25)
+ADAPTIVE_MAX_THRESHOLD=<float>             # Maximum threshold bound (0.85)
+HISTORICAL_PERFORMANCE_WEIGHT=<float>      # Historical performance influence
+MARKET_CONDITION_WEIGHT=<float>            # Market condition adjustment weight
 ```
 
 ### 📁 File Structure Standards
@@ -182,12 +209,90 @@ python main.py
 - **Resilience**: Retry mechanisms for API failures
 - **Performance**: Optimized for real-time trading operations
 
+## 🎯 Sprint 1.2: Advanced Technical Components
+
+### S₁: AdaptiveThresholdCalculator Architecture
+
+```python
+class AdaptiveThresholdCalculator:
+    """
+    Advanced threshold optimization with machine learning-like capabilities
+    """
+    def __init__(self):
+        self.base_threshold = float(os.getenv('VALIDATION_SCORE_THRESHOLD', '0.5'))
+        self.min_threshold = 0.25  # Safety lower bound
+        self.max_threshold = 0.85  # Safety upper bound
+        self.db = DatabaseManager()
+
+    def get_threshold(self, volatility=None, token=None, market_condition='NORMAL'):
+        # Multi-factor threshold calculation
+
+    def _adjust_for_volatility(self, base_threshold, volatility):
+        # Dynamic volatility-based adjustments
+
+    def _adjust_for_historical_performance(self, base_threshold, token):
+        # 7-day performance learning
+
+    def analyze_recent_performance(self, token, days=7):
+        # Comprehensive performance analysis
+```
+
+### S₂: Enhanced Validation Flow
+
+```python
+# Sprint 1.2 Advanced Validation Pipeline
+validation_score = calculate_validation_score(hyperbolic_review, openrouter_review, volatility)
+adaptive_threshold = adaptive_calculator.get_threshold(volatility, token, market_condition)
+decision = validation_score >= adaptive_threshold
+
+# Debugging and transparency
+explanation = adaptive_calculator.get_threshold_explanation(volatility, token, market_condition)
+```
+
+### S₃: Market Condition Detection
+
+**Supported Market States**:
+
+- `NORMAL`: Standard market conditions
+- `HIGH_VOLATILITY`: Increased volatility periods
+- `LOW_VOLATILITY`: Calm market periods
+- `TRENDING`: Strong directional movement
+- `SIDEWAYS`: Range-bound trading
+
+**Threshold Adjustments**:
+
+```python
+adjustments = {
+    'HIGH_VOLATILITY': -0.1,  # More permissive
+    'NORMAL': 0.0,            # No change
+    'LOW_VOLATILITY': 0.05,   # More strict
+    'TRENDING': -0.05,        # Slightly permissive
+    'SIDEWAYS': 0.03          # Slightly strict
+}
+```
+
+### S₄: Testing Infrastructure
+
+**Test Coverage**: 25 comprehensive unit tests
+
+- **AdaptiveThresholds**: 12 tests (new)
+- **ValidationScoring**: 13 tests (updated)
+
+**Test Categories**:
+
+- Volatility adjustment scenarios
+- Historical performance simulation
+- Market condition responses
+- Safety bounds validation
+- Integration testing
+
 ## 🔄 Integration Patterns
 
 ### I₁: Database Integration
 
 - **Engine**: SQLite for local persistence
 - **Schema**: Trade history, performance metrics, prediction accuracy
+- **Sprint 1.2**: Enhanced with historical performance queries
 - **Future**: IPFS migration planned for decentralization
 
 ### I₂: API Integration Architecture
