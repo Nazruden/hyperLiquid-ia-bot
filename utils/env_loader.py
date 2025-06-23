@@ -64,7 +64,12 @@ class EnvLoader:
             "adaptive_min_threshold": float(os.getenv('ADAPTIVE_MIN_THRESHOLD', '0.25')),
             "adaptive_max_threshold": float(os.getenv('ADAPTIVE_MAX_THRESHOLD', '0.85')),
             "historical_performance_weight": float(os.getenv('HISTORICAL_PERFORMANCE_WEIGHT', '0.05')),
-            "market_condition_weight": float(os.getenv('MARKET_CONDITION_WEIGHT', '0.03'))
+            "market_condition_weight": float(os.getenv('MARKET_CONDITION_WEIGHT', '0.03')),
+            # Sprint 1.3: Lag detection
+            "lag_detection_enabled": os.getenv('LAG_DETECTION_ENABLED', 'True').lower() == 'true',
+            "max_prediction_age_seconds": float(os.getenv('MAX_PREDICTION_AGE_SECONDS', '30')),
+            "max_api_latency_seconds": float(os.getenv('MAX_API_LATENCY_SECONDS', '5')),
+            "lag_warning_threshold_seconds": float(os.getenv('LAG_WARNING_THRESHOLD_SECONDS', '15'))
         }
         
         return config

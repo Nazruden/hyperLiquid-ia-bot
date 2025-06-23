@@ -8,6 +8,7 @@ from database.db_manager import DatabaseManager
 from strategy.hyperbolic_reviewer import HyperbolicReviewer
 from strategy.openrouter_reviewer import OpenRouterReviewer
 from strategy.adaptive_thresholds import AdaptiveThresholdCalculator
+from strategy.lag_detector import LagDetector
 
 
 class AlloraMind:
@@ -33,6 +34,9 @@ class AlloraMind:
         # Initialize adaptive threshold calculator
         self.adaptive_threshold_calculator = AdaptiveThresholdCalculator()
         
+        # Initialize lag detector (Sprint 1.3)
+        self.lag_detector = LagDetector()
+        
         # Validate at least one AI service is available
         if not self.hyperbolic_reviewer and not self.openrouter_reviewer:
             raise ValueError("At least one AI validation service must be configured (Hyperbolic or OpenRouter)")
@@ -45,6 +49,7 @@ class AlloraMind:
             active_services.append("OpenRouter AI")
         print(f"AI Validation Services: {', '.join(active_services)}")
         print(f"Adaptive Thresholds: {'Enabled' if os.getenv('ADAPTIVE_THRESHOLDS', 'True').lower() == 'true' else 'Disabled'}")
+        print(f"Lag Detection: {'Enabled' if os.getenv('LAG_DETECTION_ENABLED', 'True').lower() == 'true' else 'Disabled'}")
 
     def set_topic_ids(self, topic_ids):
         """
@@ -144,11 +149,34 @@ class AlloraMind:
         max_retries = 3
         for attempt in range(max_retries):
             try:
+                # Timestamp AVANT l'appel API
+                request_time = time.time()
+                
                 response = requests.get(url, headers=headers)
                 response.raise_for_status()
+                
+                # Timestamp APRÈS réception
+                response_time = time.time()
+                api_latency = response_time - request_time
+                
                 data = response.json()
                 network_inference_normalized = float(data['data']['inference_data']['network_inference_normalized'])
-                return network_inference_normalized
+                
+                # Check if lag detection is enabled
+                if os.getenv('LAG_DETECTION_ENABLED', 'True').lower() == 'true':
+                    # Return with temporal metadata for lag detection
+                    return {
+                        'prediction': network_inference_normalized,
+                        'timestamp': response_time,
+                        'request_time': request_time,
+                        'api_latency': api_latency,
+                        'topic_id': topic_id,
+                        'raw_data': data
+                    }
+                else:
+                    # Legacy mode - just return the prediction value
+                    return network_inference_normalized
+                    
             except requests.exceptions.RequestException as e:
                 print(f"Attempt {attempt + 1} failed: {e}")
                 if attempt < max_retries - 1:
@@ -159,7 +187,7 @@ class AlloraMind:
 
     def generate_signal(self, token):
         """
-        Generates a signal based on Allora predictions.
+        Generates a signal based on Allora predictions with lag detection.
         :param token: The token symbol (e.g., 'BTC', 'ETH') to fetch the price for.
         :return: A signal string ("BUY", "SELL", or "HOLD"), the percentage difference, current price, and prediction.
         """
@@ -168,27 +196,46 @@ class AlloraMind:
             self.log_analysis(token, "SKIP", None, None, reason="No topic ID configured")
             return "HOLD", None, None, None
 
-        prediction = self.get_inference_ai_model(topic_id)
-        if prediction is None:
+        prediction_data = self.get_inference_ai_model(topic_id)
+        if prediction_data is None:
             self.log_analysis(token, "SKIP", None, None, reason="No prediction available")
             return "HOLD", None, None, None
+
+        # Handle both legacy and new formats
+        if isinstance(prediction_data, dict):
+            # New format with lag detection
+            prediction_value = prediction_data['prediction']
+            
+            # Check lag detection if enabled
+            if os.getenv('LAG_DETECTION_ENABLED', 'True').lower() == 'true':
+                is_fresh, rejection_reason, lag_metrics = self.lag_detector.check_prediction_freshness(prediction_data)
+                
+                if not is_fresh:
+                    self.log_analysis(token, "SKIP", None, None, reason=f"Lag rejection: {rejection_reason}")
+                    return "HOLD", None, None, None
+                
+                # Log timing metrics
+                self.lag_detector.log_prediction_timing(token, prediction_data, "ACCEPTED")
+        else:
+            # Legacy format - just a number
+            prediction_value = prediction_data
 
         current_price = self.manager.get_price(token)
         if current_price is None:
             self.log_analysis(token, "SKIP", None, None, reason="No price available")
             return "HOLD", None, None, None
 
-        prediction = float(prediction)
+        prediction_value = float(prediction_value)
         current_price = float(current_price)
-        difference = (prediction - current_price) / current_price
+        difference = (prediction_value - current_price) / current_price
 
         if abs(difference) >= self.threshold:
             signal = "BUY" if difference > 0 else "SELL"
-            self.log_analysis(token, signal, current_price, prediction, difference)
-            return signal, difference, current_price, prediction
+            self.log_analysis(token, signal, current_price, prediction_value, difference)
+            return signal, difference, current_price, prediction_value
             
-        self.log_analysis(token, "HOLD", current_price, prediction, difference, "Below threshold")
-        return "HOLD", difference, current_price, prediction
+        self.log_analysis(token, "HOLD", current_price, prediction_value, difference, "Below threshold")
+        return "HOLD", difference, current_price, prediction_value
 
     def open_trade(self):
         """
