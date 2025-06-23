@@ -20,7 +20,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from dashboard.backend.websocket_manager import WebSocketManager
 from dashboard.backend.bot_controller import BotController
 from dashboard.backend.data_service import DataService
-from dashboard.backend.routers import bot_control, analytics, trades
+from dashboard.backend.routers import bot_control, analytics, trades, crypto_config
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -57,6 +57,7 @@ data_service = DataService()
 app.include_router(bot_control.router, prefix="/api/bot", tags=["Bot Control"])
 app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"])
 app.include_router(trades.router, prefix="/api/trades", tags=["Trades"])
+app.include_router(crypto_config.router, tags=["Crypto Configuration"])
 
 @app.on_event("startup")
 async def startup_event():

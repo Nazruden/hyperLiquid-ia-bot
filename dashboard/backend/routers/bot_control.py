@@ -167,4 +167,92 @@ async def bot_health_check(bot_controller: BotController = Depends(get_bot_contr
             "success": False,
             "error": str(e),
             "controller_healthy": False
-        } 
+        }
+
+# ===== CRYPTO MANAGEMENT & MODE CONTROL ENDPOINTS =====
+
+@router.post("/start-monitoring")
+async def start_monitoring(bot_controller: BotController = Depends(get_bot_controller)):
+    """Start bot monitoring mode (STANDBY → ACTIVE)"""
+    try:
+        result = await bot_controller.start_monitoring()
+        
+        return {
+            "success": result["success"],
+            "message": result["message"],
+            "data": result["status"]
+        }
+        
+    except Exception as e:
+        logger.error(f"Error starting monitoring: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/set-standby")
+async def set_standby_mode(bot_controller: BotController = Depends(get_bot_controller)):
+    """Set bot to STANDBY mode (pause monitoring)"""
+    try:
+        result = await bot_controller.set_standby_mode()
+        
+        return {
+            "success": result["success"],
+            "message": result["message"],
+            "data": result["status"]
+        }
+        
+    except Exception as e:
+        logger.error(f"Error setting standby mode: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/mode-status")
+async def get_bot_mode_status(bot_controller: BotController = Depends(get_bot_controller)):
+    """Get detailed bot mode and crypto monitoring status"""
+    try:
+        result = bot_controller.get_bot_mode_status()
+        
+        return {
+            "success": result["success"],
+            "message": result.get("message", "Bot mode status retrieved"),
+            "data": result["data"]
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting bot mode status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/update-crypto-config")
+async def update_crypto_config(
+    crypto_updates: Dict[str, Any],
+    bot_controller: BotController = Depends(get_bot_controller)
+):
+    """Update crypto configuration and notify bot in real-time"""
+    try:
+        result = await bot_controller.update_crypto_config(crypto_updates)
+        
+        return {
+            "success": result["success"],
+            "message": result["message"],
+            "data": {
+                "active_cryptos": result["active_cryptos"],
+                "status": result["status"]
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error updating crypto config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/initialize-standby")
+async def initialize_with_standby(bot_controller: BotController = Depends(get_bot_controller)):
+    """Initialize bot controller in STANDBY mode"""
+    try:
+        result = await bot_controller.initialize_with_standby()
+        
+        return {
+            "success": result["success"],
+            "message": result["message"],
+            "data": result["status"]
+        }
+        
+    except Exception as e:
+        logger.error(f"Error initializing with standby: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) 

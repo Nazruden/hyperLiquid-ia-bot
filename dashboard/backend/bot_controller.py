@@ -1,6 +1,6 @@
 """
 Bot Controller for Managing Trading Bot Lifecycle
-Handles start, stop, restart, and status operations
+Handles start, stop, restart, and status operations with STANDBY/ACTIVE modes
 """
 
 import subprocess
@@ -17,10 +17,12 @@ import sys
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
+from config_manager import ConfigManager
+
 logger = logging.getLogger(__name__)
 
 class BotController:
-    """Controls the trading bot process lifecycle"""
+    """Controls the trading bot process lifecycle with crypto management modes"""
     
     def __init__(self):
         self.bot_process: Optional[subprocess.Popen] = None
@@ -29,11 +31,19 @@ class BotController:
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 
             "main.py"
         )
+        
+        # Initialize config manager for crypto management
+        self.config_manager = ConfigManager()
+        
+        # Extended status cache with mode support
         self.status_cache = {
-            "status": "stopped",
+            "status": "stopped",  # stopped, running
+            "mode": "STANDBY",    # STANDBY, ACTIVE
             "last_updated": datetime.now().isoformat(),
             "uptime": 0,
-            "restart_count": 0
+            "restart_count": 0,
+            "active_cryptos": {},
+            "monitoring_enabled": False
         }
     
     def get_status(self) -> Dict[str, Any]:
@@ -294,4 +304,182 @@ class BotController:
             logger.error(f"Error getting system resources: {e}")
             return {
                 "error": str(e)
+            }
+
+    # ===== CRYPTO MANAGEMENT & MODE CONTROL =====
+    
+    async def start_monitoring(self) -> Dict[str, Any]:
+        """Start bot in monitoring mode (transition from STANDBY to ACTIVE)"""
+        try:
+            # Check if we have active cryptos to monitor
+            active_cryptos = self.config_manager.get_active_cryptos_for_bot()
+            
+            if not active_cryptos:
+                return {
+                    "success": False,
+                    "message": "Cannot start monitoring: No active cryptocurrencies configured",
+                    "status": self.get_status()
+                }
+            
+            # Start the bot if not already running
+            if self.get_status()["status"] != "running":
+                start_result = await self.start_bot()
+                if not start_result["success"]:
+                    return {
+                        "success": False,
+                        "message": f"Failed to start bot: {start_result['message']}",
+                        "status": self.get_status()
+                    }
+            
+            # Set mode to ACTIVE and enable monitoring
+            self.status_cache.update({
+                "mode": "ACTIVE",
+                "monitoring_enabled": True,
+                "active_cryptos": active_cryptos,
+                "last_updated": datetime.now().isoformat()
+            })
+            
+            # Send command to bot to start monitoring
+            self.config_manager.db.add_bot_command('SET_MODE_ACTIVE', {
+                "active_cryptos": active_cryptos,
+                "mode": "ACTIVE"
+            })
+            
+            logger.info(f"Bot monitoring started with {len(active_cryptos)} cryptocurrencies")
+            
+            return {
+                "success": True,
+                "message": f"Monitoring started with {len(active_cryptos)} active cryptocurrencies",
+                "status": self.get_status()
+            }
+            
+        except Exception as e:
+            logger.error(f"Error starting monitoring: {e}")
+            return {
+                "success": False,
+                "message": f"Error starting monitoring: {str(e)}",
+                "status": self.get_status()
+            }
+    
+    async def set_standby_mode(self) -> Dict[str, Any]:
+        """Set bot to STANDBY mode (stop monitoring but keep bot running)"""
+        try:
+            # Update status to STANDBY
+            self.status_cache.update({
+                "mode": "STANDBY",
+                "monitoring_enabled": False,
+                "last_updated": datetime.now().isoformat()
+            })
+            
+            # Send command to bot to set standby mode
+            self.config_manager.db.add_bot_command('SET_MODE_STANDBY', {
+                "mode": "STANDBY"
+            })
+            
+            logger.info("Bot set to STANDBY mode")
+            
+            return {
+                "success": True,
+                "message": "Bot set to STANDBY mode - monitoring paused",
+                "status": self.get_status()
+            }
+            
+        except Exception as e:
+            logger.error(f"Error setting standby mode: {e}")
+            return {
+                "success": False,
+                "message": f"Error setting standby mode: {str(e)}",
+                "status": self.get_status()
+            }
+    
+    async def update_crypto_config(self, crypto_updates: Dict[str, Any]) -> Dict[str, Any]:
+        """Update crypto configuration and notify bot"""
+        try:
+            # Update local status cache
+            active_cryptos = self.config_manager.get_active_cryptos_for_bot()
+            self.status_cache.update({
+                "active_cryptos": active_cryptos,
+                "last_updated": datetime.now().isoformat()
+            })
+            
+            # Send real-time update to bot
+            self.config_manager.db.add_bot_command('UPDATE_CRYPTO_CONFIG', {
+                "active_cryptos": active_cryptos,
+                "updates": crypto_updates
+            })
+            
+            logger.info(f"Crypto configuration updated: {len(active_cryptos)} active cryptos")
+            
+            return {
+                "success": True,
+                "message": f"Crypto configuration updated successfully",
+                "active_cryptos": active_cryptos,
+                "status": self.get_status()
+            }
+            
+        except Exception as e:
+            logger.error(f"Error updating crypto config: {e}")
+            return {
+                "success": False,
+                "message": f"Error updating crypto config: {str(e)}",
+                "status": self.get_status()
+            }
+    
+    def get_bot_mode_status(self) -> Dict[str, Any]:
+        """Get detailed bot mode and crypto status"""
+        try:
+            # Update active cryptos from config manager
+            active_cryptos = self.config_manager.get_active_cryptos_for_bot()
+            self.status_cache["active_cryptos"] = active_cryptos
+            
+            # Get bot process status
+            process_status = self.get_status()
+            
+            return {
+                "success": True,
+                "data": {
+                    "bot_status": process_status["status"],
+                    "bot_mode": self.status_cache["mode"],
+                    "monitoring_enabled": self.status_cache["monitoring_enabled"],
+                    "active_cryptos": active_cryptos,
+                    "active_crypto_count": len(active_cryptos),
+                    "pid": process_status.get("pid"),
+                    "uptime": process_status.get("uptime", 0),
+                    "last_updated": datetime.now().isoformat()
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting bot mode status: {e}")
+            return {
+                "success": False,
+                "message": f"Error getting bot mode status: {str(e)}",
+                "data": {}
+            }
+    
+    async def initialize_with_standby(self) -> Dict[str, Any]:
+        """Initialize bot in STANDBY mode (for startup)"""
+        try:
+            # Set initial mode to STANDBY
+            self.status_cache.update({
+                "mode": "STANDBY",
+                "monitoring_enabled": False,
+                "active_cryptos": {},
+                "last_updated": datetime.now().isoformat()
+            })
+            
+            logger.info("Bot controller initialized in STANDBY mode")
+            
+            return {
+                "success": True,
+                "message": "Bot controller initialized in STANDBY mode",
+                "status": self.get_status()
+            }
+            
+        except Exception as e:
+            logger.error(f"Error initializing with standby: {e}")
+            return {
+                "success": False,
+                "message": f"Error initializing: {str(e)}",
+                "status": self.get_status()
             } 
