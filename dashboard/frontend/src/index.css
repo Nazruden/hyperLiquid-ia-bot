@@ -1,9 +1,22 @@
-@import 'tailwindcss';
+@import "tailwindcss";
 
 @plugin '@tailwindcss/forms';
 @plugin '@tailwindcss/typography';
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
+  /* Semantic Text Colors - automatically switch with theme */
+  --color-text-primary: #111827;
+  --color-text-secondary: #6b7280;
+  --color-text-muted: #9ca3af;
+  --color-text-inverse: #ffffff;
+
+  /* Semantic Background Colors */
+  --color-bg-secondary: #e5e7eb;
+  --color-bg-secondary-hover: #d1d5db;
+
+  /* Light Mode Colors */
   --color-primary-50: #eff6ff;
   --color-primary-100: #dbeafe;
   --color-primary-200: #bfdbfe;
@@ -14,6 +27,15 @@
   --color-primary-700: #1d4ed8;
   --color-primary-800: #1e40af;
   --color-primary-900: #1e3a8a;
+
+  /* Dark Mode Colors */
+  --color-dark-bg: #0f172a;
+  --color-dark-surface: #1e293b;
+  --color-dark-surface-hover: #334155;
+  --color-dark-border: #475569;
+  --color-dark-text-primary: #f8fafc;
+  --color-dark-text-secondary: #cbd5e1;
+  --color-dark-text-muted: #94a3b8;
 
   --color-success-50: #f0fdf4;
   --color-success-100: #dcfce7;
@@ -61,6 +83,26 @@
   }
 }
 
+/* Dark mode semantic color overrides */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-text-primary: var(--color-dark-text-primary);
+    --color-text-secondary: var(--color-dark-text-secondary);
+    --color-text-muted: var(--color-dark-text-muted);
+    --color-text-inverse: #1f2937;
+  }
+}
+
+/* Class-based dark mode overrides */
+.dark {
+  --color-text-primary: var(--color-dark-text-primary);
+  --color-text-secondary: var(--color-dark-text-secondary);
+  --color-text-muted: var(--color-dark-text-muted);
+  --color-text-inverse: #1f2937;
+  --color-bg-secondary: var(--color-dark-surface-hover);
+  --color-bg-secondary-hover: var(--color-dark-border);
+}
+
 /*
   The default border color has changed to `currentcolor` in Tailwind CSS v4,
   so we've added these compatibility styles to make sure everything still
@@ -80,7 +122,7 @@
 }
 
 @utility card {
-  @apply bg-white rounded-lg shadow-xs border border-gray-200 p-6;
+  @apply bg-white dark:bg-dark-surface rounded-lg shadow-xs border border-gray-200 dark:border-dark-border p-6;
 }
 
 @utility card-header {
@@ -88,15 +130,40 @@
 }
 
 @utility metric-card {
-  @apply bg-white rounded-lg shadow-xs border border-gray-200 p-4;
+  @apply bg-white dark:bg-dark-surface rounded-lg shadow-xs border border-gray-200 dark:border-dark-border p-4;
 }
 
 @utility metric-value {
-  @apply text-2xl font-bold text-gray-900;
+  @apply text-2xl font-bold;
+  color: var(--color-text-primary);
 }
 
 @utility metric-label {
-  @apply text-sm font-medium text-gray-500;
+  @apply text-sm font-medium;
+  color: var(--color-text-secondary);
+}
+
+/* Semantic text utilities */
+@utility text-primary {
+  color: var(--color-text-primary);
+}
+
+@utility text-secondary {
+  color: var(--color-text-secondary);
+}
+
+@utility text-muted {
+  color: var(--color-text-muted);
+}
+
+@utility heading {
+  @apply font-semibold;
+  color: var(--color-text-primary);
+}
+
+@utility label {
+  @apply text-sm;
+  color: var(--color-text-secondary);
 }
 
 @utility metric-change {
@@ -140,7 +207,13 @@
 }
 
 @utility btn-secondary {
-  @apply btn bg-gray-200 text-gray-900 hover:bg-gray-300 focus:ring-gray-500;
+  @apply btn focus:ring-gray-500;
+  background-color: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+
+  &:hover {
+    background-color: var(--color-bg-secondary-hover);
+  }
 }
 
 @utility status-dot {
