@@ -233,19 +233,19 @@ class TestEnvironmentVariables(unittest.TestCase):
         os.environ['ALLORA_UPSHOT_KEY'] = 'test_allora'
         os.environ['HYPERBOLIC_API_KEY'] = 'test_hyperbolic'
         
-        # Set test environment variables
-        os.environ['VALIDATION_SCORE_THRESHOLD'] = '0.45'
+        # Use testnet configuration values
+        os.environ['VALIDATION_SCORE_THRESHOLD'] = '0.55'
         os.environ['ADAPTIVE_THRESHOLDS'] = 'True'
-        os.environ['HYPERBOLIC_BASE_WEIGHT'] = '0.7'
-        os.environ['OPENROUTER_BASE_WEIGHT'] = '0.3'
+        os.environ['HYPERBOLIC_BASE_WEIGHT'] = '0.6'
+        os.environ['OPENROUTER_BASE_WEIGHT'] = '0.4'
         
         env_loader = EnvLoader()
         config = env_loader.get_config()
         
-        self.assertEqual(config['validation_score_threshold'], 0.45)
+        self.assertEqual(config['validation_score_threshold'], 0.55)
         self.assertTrue(config['adaptive_thresholds'])
-        self.assertEqual(config['hyperbolic_base_weight'], 0.7)
-        self.assertEqual(config['openrouter_base_weight'], 0.3)
+        self.assertEqual(config['hyperbolic_base_weight'], 0.6)
+        self.assertEqual(config['openrouter_base_weight'], 0.4)
 
 if __name__ == '__main__':
     print("🧪 Testing Sprint 1.1: Validation Logic Flexible")
