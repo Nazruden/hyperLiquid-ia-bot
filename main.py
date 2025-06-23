@@ -9,6 +9,9 @@ import time
 
 
 def main():
+    print("🚀 HyperLiquid AI Trading Bot with Dynamic Crypto Management")
+    print("=" * 60)
+    
     (address, info, exchange, vault, allora_upshot_key, hyperbolic_api_key, 
      openrouter_api_key, openrouter_model, check_for_trades, price_gap,
      allowed_amount_per_trade, max_leverage, allora_topics) = setup()
@@ -16,18 +19,23 @@ def main():
     manager = OrderManager(exchange, vault, allowed_amount_per_trade, max_leverage, info)
     res = manager.get_wallet_summary()
     print(res)
+    
+    # Initialize AlloraMind with crypto management capabilities
     allora_mind = AlloraMind(manager, allora_upshot_key, hyperbolic_api_key, 
                            openrouter_api_key, openrouter_model, threshold=price_gap)
-    allora_mind.set_topic_ids(allora_topics)
-    allora_mind.start_allora_trade_bot(interval=check_for_trades)
-
-    # Add periodic analysis
-    while True:
-        try:
-            analyze_trading_results()
-            time.sleep(3600)  # Analyze every hour
-        except KeyboardInterrupt:
-            break
+    
+    # Set legacy topic IDs if no database config exists (backward compatibility)
+    if allora_topics:
+        print(f"🔄 Setting legacy topic IDs: {allora_topics}")
+        allora_mind.set_topic_ids(allora_topics)
+    
+    print("🟡 Starting bot with STANDBY mode and command listening...")
+    print("📱 Use the dashboard to activate cryptocurrencies and start monitoring")
+    print("🌐 Dashboard: http://localhost:4000")
+    print("=" * 60)
+    
+    # Start with STANDBY mode - will load active cryptos from database
+    allora_mind.start_with_standby(interval=check_for_trades)
 
 
 def analyze_trading_results():

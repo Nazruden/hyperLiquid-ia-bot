@@ -1,6 +1,8 @@
 import requests
 import time
 import os
+import json
+from datetime import datetime
 from utils.helpers import round_price
 from strategy.custom_strategy import custom_strategy
 from utils.constants import ALLORA_API_BASE_URL
@@ -26,6 +28,12 @@ class AlloraMind:
         self.timeout = 5
         self.base_url = ALLORA_API_BASE_URL
         self.db = DatabaseManager()
+        
+        # ===== CRYPTO MANAGEMENT & MODE CONTROL =====
+        self.mode = os.getenv('BOT_DEFAULT_MODE', 'STANDBY')  # STANDBY, ACTIVE
+        self.monitoring_enabled = False
+        self.command_check_interval = int(os.getenv('CONFIG_UPDATE_INTERVAL', '10'))
+        self.last_command_check = 0
         
         # Initialize AI reviewers only if API keys are provided
         self.hyperbolic_reviewer = HyperbolicReviewer(hyperbolic_api_key) if hyperbolic_api_key else None
@@ -419,17 +427,240 @@ class AlloraMind:
 
     def start_allora_trade_bot(self, interval=180):
         """
-        Starts the trading and monitoring process at regular intervals.
+        Starts the trading and monitoring process with STANDBY/ACTIVE mode support.
         :param interval: Time in seconds between checks (default: 180 seconds).
-        :param profit_target: Profit target percentage for trades.
-        :param loss_target: Loss target percentage for trades.
         """
+        print(f"🤖 AlloraMind starting in {self.mode} mode")
+        print(f"📡 Command check interval: {self.command_check_interval}s")
+        print(f"🔄 Trading interval: {interval}s")
+        
         while True:
-            print("Running trading and position monitoring...")
-            self.open_trade()
-            self.monitor_positions()
-            print(f"Sleeping for {interval} seconds...")
-            time.sleep(interval)
+            current_time = time.time()
+            
+            # Check for dashboard commands periodically
+            if current_time - self.last_command_check >= self.command_check_interval:
+                self.check_dashboard_commands()
+                self.last_command_check = current_time
+            
+            # Execute based on current mode
+            if self.mode == "ACTIVE" and self.monitoring_enabled and self.topic_ids:
+                print("🟢 ACTIVE mode - Running trading and position monitoring...")
+                self.open_trade()
+                self.monitor_positions()
+                print(f"💤 Sleeping for {interval} seconds...")
+                time.sleep(interval)
+            elif self.mode == "STANDBY":
+                print("🟡 STANDBY mode - Bot is idle, waiting for activation...")
+                time.sleep(self.command_check_interval)  # Check commands more frequently in standby
+            else:
+                print("⚠️ ACTIVE mode but no cryptocurrencies configured - waiting...")
+                time.sleep(self.command_check_interval)
+                
+    def check_dashboard_commands(self):
+        """Check for pending commands from dashboard and execute them"""
+        try:
+            commands = self.db.get_pending_commands()
+            
+            for command in commands:
+                try:
+                    success = self.execute_command(command)
+                    self.db.mark_command_executed(
+                        command['id'], 
+                        success=success,
+                        error_message=None if success else "Command execution failed"
+                    )
+                except Exception as e:
+                    print(f"❌ Error executing command {command['id']}: {e}")
+                    self.db.mark_command_executed(
+                        command['id'], 
+                        success=False, 
+                        error_message=str(e)
+                    )
+                    
+        except Exception as e:
+            print(f"❌ Error checking commands: {e}")
+    
+    def execute_command(self, command) -> bool:
+        """Execute a dashboard command"""
+        try:
+            command_type = command['command_type']
+            command_data = command.get('command_data', {})
+            
+            print(f"📨 Executing command: {command_type}")
+            
+            if command_type == 'SET_MODE_ACTIVE':
+                return self.set_mode_active(command_data)
+            elif command_type == 'SET_MODE_STANDBY':
+                return self.set_mode_standby(command_data)
+            elif command_type == 'UPDATE_CRYPTO_CONFIG':
+                return self.update_crypto_config(command_data)
+            elif command_type == 'ACTIVATE_CRYPTO':
+                return self.activate_crypto(command_data)
+            elif command_type == 'DEACTIVATE_CRYPTO':
+                return self.deactivate_crypto(command_data)
+            elif command_type == 'BATCH_UPDATE_CRYPTOS':
+                return self.batch_update_cryptos(command_data)
+            else:
+                print(f"⚠️ Unknown command type: {command_type}")
+                return False
+                
+        except Exception as e:
+            print(f"❌ Command execution error: {e}")
+            return False
+    
+    def set_mode_active(self, data) -> bool:
+        """Activate monitoring mode"""
+        try:
+            active_cryptos = data.get('active_cryptos', {})
+            
+            if not active_cryptos:
+                print("⚠️ Cannot activate: No active cryptocurrencies configured")
+                return False
+            
+            self.mode = "ACTIVE"
+            self.monitoring_enabled = True
+            self.topic_ids = active_cryptos
+            
+            print(f"🟢 Bot activated with {len(active_cryptos)} cryptocurrencies:")
+            for symbol, topic_id in active_cryptos.items():
+                print(f"  📈 {symbol} (Topic {topic_id})")
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error activating bot: {e}")
+            return False
+    
+    def set_mode_standby(self, data) -> bool:
+        """Set bot to standby mode"""
+        try:
+            self.mode = "STANDBY"
+            self.monitoring_enabled = False
+            
+            print("🟡 Bot set to STANDBY mode - monitoring paused")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error setting standby mode: {e}")
+            return False
+    
+    def update_crypto_config(self, data) -> bool:
+        """Update crypto configuration dynamically"""
+        try:
+            active_cryptos = data.get('active_cryptos', {})
+            old_cryptos = set(self.topic_ids.keys())
+            new_cryptos = set(active_cryptos.keys())
+            
+            # Update topic IDs
+            self.topic_ids = active_cryptos
+            
+            # Log changes
+            added = new_cryptos - old_cryptos
+            removed = old_cryptos - new_cryptos
+            
+            if added:
+                print(f"➕ Added cryptocurrencies: {', '.join(added)}")
+            if removed:
+                print(f"➖ Removed cryptocurrencies: {', '.join(removed)}")
+            if not added and not removed:
+                print("🔄 Crypto configuration updated (no changes)")
+            
+            print(f"📊 Total active cryptocurrencies: {len(active_cryptos)}")
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error updating crypto config: {e}")
+            return False
+    
+    def activate_crypto(self, data) -> bool:
+        """Activate a single cryptocurrency"""
+        try:
+            symbol = data.get('symbol')
+            topic_id = data.get('topic_id')
+            
+            if not symbol or not topic_id:
+                print("⚠️ Invalid crypto activation data")
+                return False
+            
+            self.topic_ids[symbol] = topic_id
+            print(f"✅ Activated {symbol} (Topic {topic_id})")
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error activating crypto {data.get('symbol', 'unknown')}: {e}")
+            return False
+    
+    def deactivate_crypto(self, data) -> bool:
+        """Deactivate a single cryptocurrency"""
+        try:
+            symbol = data.get('symbol')
+            
+            if not symbol:
+                print("⚠️ Invalid crypto deactivation data")
+                return False
+            
+            if symbol in self.topic_ids:
+                del self.topic_ids[symbol]
+                print(f"🔴 Deactivated {symbol}")
+            else:
+                print(f"⚠️ {symbol} was not active")
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error deactivating crypto {data.get('symbol', 'unknown')}: {e}")
+            return False
+    
+    def batch_update_cryptos(self, data) -> bool:
+        """Handle batch crypto updates"""
+        try:
+            activated = data.get('activated', [])
+            deactivated = data.get('deactivated', [])
+            
+            # Remove deactivated cryptos
+            for symbol in deactivated:
+                if symbol in self.topic_ids:
+                    del self.topic_ids[symbol]
+            
+            if activated:
+                print(f"✅ Batch activated: {', '.join(activated)}")
+            if deactivated:
+                print(f"🔴 Batch deactivated: {', '.join(deactivated)}")
+            
+            # Get updated config from database
+            active_cryptos = self.db.get_active_cryptos()
+            self.topic_ids = active_cryptos
+            
+            print(f"📊 Updated crypto mix: {len(self.topic_ids)} active")
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error in batch crypto update: {e}")
+            return False
+            
+    def start_with_standby(self, interval=180):
+        """Start bot with STANDBY mode initialization"""
+        print("🚀 Starting AlloraMind with crypto management capabilities...")
+        print(f"🟡 Initial mode: {self.mode}")
+        
+        # Load any existing active cryptos from database
+        try:
+            active_cryptos = self.db.get_active_cryptos()
+            if active_cryptos:
+                self.topic_ids = active_cryptos
+                print(f"📂 Loaded {len(active_cryptos)} active cryptocurrencies from database")
+                for symbol, topic_id in active_cryptos.items():
+                    print(f"  📈 {symbol} (Topic {topic_id})")
+            else:
+                print("📭 No active cryptocurrencies found - starting in STANDBY")
+        except Exception as e:
+            print(f"⚠️ Error loading crypto config: {e}")
+        
+        # Start the main loop
+        self.start_allora_trade_bot(interval)
 
     def log_analysis(self, token, signal_type, current_price, prediction, difference=None, reason=None):
         """Silent logging to database without affecting console output"""

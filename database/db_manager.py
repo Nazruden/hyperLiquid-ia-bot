@@ -177,6 +177,38 @@ class DatabaseManager:
         conn.close()
         return active_cryptos
     
+    def add_crypto_config(self, symbol, topic_id, availability, 
+                        hyperliquid_available=None, allora_available=None):
+        """Add a new crypto configuration"""
+        # Auto-detect platform availability based on availability string
+        if hyperliquid_available is None:
+            hyperliquid_available = availability in ['both', 'hyperliquid']
+        if allora_available is None:
+            allora_available = availability in ['both', 'allora']
+        
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                INSERT INTO crypto_configs 
+                (symbol, topic_id, is_active, availability, 
+                 hyperliquid_available, allora_available, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                symbol, topic_id, False, availability,
+                hyperliquid_available, allora_available, datetime.now()
+            ))
+            
+            conn.commit()
+            return cursor.lastrowid
+            
+        except Exception as e:
+            print(f"Error adding crypto config: {e}")
+            return None
+        finally:
+            conn.close()
+
     def update_crypto_config(self, symbol, topic_id, is_active, availability, 
                            hyperliquid_available=False, allora_available=False,
                            last_price=None, volume_24h=None):
