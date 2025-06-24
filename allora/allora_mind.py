@@ -148,50 +148,110 @@ class AlloraMind:
         )
 
     def get_inference_ai_model(self, topic_id):
-        url = f'{self.base_url}ethereum-11155111?allora_topic_id={topic_id}'
+        # NEW: Use official Allora API v2 with fallback to testnet
+        endpoints = [
+            {
+                'name': 'Official API v2',
+                'url': f'https://api.allora.network/v2/allora/consumer/ethereum-11155111?allora_topic_id={topic_id}',
+                'parse_method': 'parse_v2_response'
+            },
+            {
+                'name': 'Testnet API (fallback)',
+                'url': f'https://allora-api.testnet.allora.network/emissions/v7/latest_network_inferences/{topic_id}',
+                'parse_method': 'parse_testnet_response'
+            }
+        ]
+        
         headers = {
             'accept': 'application/json',
             'x-api-key': self.allora_upshot_key
         }
 
         max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                # Timestamp AVANT l'appel API
-                request_time = time.time()
-                
-                response = requests.get(url, headers=headers)
-                response.raise_for_status()
-                
-                # Timestamp APRÈS réception
-                response_time = time.time()
-                api_latency = response_time - request_time
-                
-                data = response.json()
-                network_inference_normalized = float(data['data']['inference_data']['network_inference_normalized'])
-                
-                # Check if lag detection is enabled
-                if os.getenv('LAG_DETECTION_ENABLED', 'True').lower() == 'true':
-                    # Return with temporal metadata for lag detection
-                    return {
-                        'prediction': network_inference_normalized,
-                        'timestamp': response_time,
-                        'request_time': request_time,
-                        'api_latency': api_latency,
-                        'topic_id': topic_id,
-                        'raw_data': data
-                    }
-                else:
-                    # Legacy mode - just return the prediction value
-                    return network_inference_normalized
+        
+        # Try each endpoint in order
+        for endpoint in endpoints:
+            print(f"🔗 Trying {endpoint['name']}...")
+            
+            for attempt in range(max_retries):
+                try:
+                    # Timestamp AVANT l'appel API
+                    request_time = time.time()
                     
-            except requests.exceptions.RequestException as e:
-                print(f"Attempt {attempt + 1} failed: {e}")
-                if attempt < max_retries - 1:
-                    time.sleep(2)
-                else:
-                    print("Max retries reached, could not fetch data.")
-                    return None
+                    response = requests.get(endpoint['url'], headers=headers)
+                    response.raise_for_status()
+                    
+                    # Timestamp APRÈS réception
+                    response_time = time.time()
+                    api_latency = response_time - request_time
+                    
+                    data = response.json()
+                    
+                    # Parse response based on endpoint type
+                    prediction_value = getattr(self, endpoint['parse_method'])(data)
+                    
+                    if prediction_value is not None:
+                        print(f"✅ {endpoint['name']} successful: ${prediction_value:.2f} (latency: {api_latency:.2f}s)")
+                        
+                        # Check if lag detection is enabled
+                        if os.getenv('LAG_DETECTION_ENABLED', 'True').lower() == 'true':
+                            # Return with temporal metadata for lag detection
+                            return {
+                                'prediction': prediction_value,
+                                'timestamp': response_time,
+                                'request_time': request_time,
+                                'api_latency': api_latency,
+                                'topic_id': topic_id,
+                                'raw_data': data,
+                                'endpoint_used': endpoint['name']
+                            }
+                        else:
+                            # Legacy mode - just return the prediction value
+                            return prediction_value
+                    else:
+                        print(f"⚠️ {endpoint['name']}: Invalid response format")
+                        
+                except requests.exceptions.RequestException as e:
+                    print(f"❌ {endpoint['name']} - Attempt {attempt + 1} failed: {e}")
+                    if attempt < max_retries - 1:
+                        time.sleep(2)
+                    else:
+                        print(f"🚫 {endpoint['name']}: Max retries reached")
+                        break
+        
+        print("🛑 All endpoints failed")
+        return None
+
+    def parse_v2_response(self, data):
+        """Parse official Allora API v2 response format"""
+        try:
+            if data.get('status') and 'data' in data:
+                inference_data = data['data'].get('inference_data', {})
+                network_inference_normalized = inference_data.get('network_inference_normalized')
+                if network_inference_normalized:
+                    return float(network_inference_normalized)
+            return None
+        except (ValueError, KeyError, TypeError) as e:
+            print(f"Error parsing v2 response: {e}")
+            return None
+
+    def parse_testnet_response(self, data):
+        """Parse legacy testnet API response format"""
+        try:
+            if 'network_inferences' in data:
+                network_inference = data['network_inferences'].get('combined_value')
+                if network_inference:
+                    return float(network_inference)
+            elif 'data' in data and 'inference_data' in data['data']:
+                # Alternative testnet format
+                inference_data = data['data']['inference_data']
+                network_inference_normalized = inference_data.get('network_inference_normalized')
+                if network_inference_normalized:
+                    return float(network_inference_normalized)
+            return None
+        except (ValueError, KeyError, TypeError) as e:
+            print(f"Error parsing testnet response: {e}")
+            return None
 
     def generate_signal(self, token):
         """
@@ -251,6 +311,7 @@ class AlloraMind:
         """
         tokens = list(self.topic_ids.keys())
         for token in tokens:
+            print(f"\n🔄 Processing {token}...")
             # Get open positions using the new format
             open_positions = self.manager.list_open_positions()
             
@@ -284,8 +345,19 @@ class AlloraMind:
                 'market_condition': 'ANALYSIS'
             }
             # Get reviews from both AI validators
-            hyperbolic_review = self.hyperbolic_reviewer.review_trade(trade_data) if self.hyperbolic_reviewer else None
-            openrouter_review = self.openrouter_reviewer.review_trade(trade_data) if self.openrouter_reviewer else None
+            print(f"🤖 Requesting AI validation for {token}...")
+            
+            hyperbolic_review = None
+            if self.hyperbolic_reviewer:
+                print("   🔍 Calling Hyperbolic AI...")
+                hyperbolic_review = self.hyperbolic_reviewer.review_trade(trade_data)
+                
+            openrouter_review = None  
+            if self.openrouter_reviewer:
+                print("   🔍 Calling OpenRouter AI...")
+                openrouter_review = self.openrouter_reviewer.review_trade(trade_data)
+                
+            print(f"✅ AI validation completed for {token}")
             
             # Check if at least one validator responded
             if hyperbolic_review is None and openrouter_review is None:
@@ -302,15 +374,17 @@ class AlloraMind:
             adaptive_threshold = self.get_adaptive_threshold(current_volatility, token=token, market_condition='NORMAL')
 
             # Log individual validator results with new system
-            if hyperbolic_review:
-                print(f"Hyperbolic AI - Approval: {hyperbolic_review['approval']}, Confidence: {hyperbolic_review['confidence']}%")
-            else:
-                print("Hyperbolic AI - No response")
+            if self.hyperbolic_reviewer:
+                if hyperbolic_review:
+                    print(f"Hyperbolic AI - Approval: {hyperbolic_review['approval']}, Confidence: {hyperbolic_review['confidence']}%")
+                else:
+                    print("Hyperbolic AI - No response")
                 
-            if openrouter_review:
-                print(f"OpenRouter AI - Approval: {openrouter_review['approval']}, Confidence: {openrouter_review['confidence']}%")
-            else:
-                print("OpenRouter AI - No response")
+            if self.openrouter_reviewer:
+                if openrouter_review:
+                    print(f"OpenRouter AI - Approval: {openrouter_review['approval']}, Confidence: {openrouter_review['confidence']}%")
+                else:
+                    print("OpenRouter AI - No response")
 
             # NEW: Validation decision based on adaptive scoring
             validation_mode = f"Adaptive Scoring (threshold: {adaptive_threshold:.3f}, score: {validation_score:.3f})"
@@ -359,13 +433,13 @@ class AlloraMind:
             else:
                 print(f"Trade rejected by AI scoring system:")
                 print(f"Validation score {validation_score:.3f} below threshold {adaptive_threshold:.3f}")
-                if hyperbolic_review:
+                if self.hyperbolic_reviewer and hyperbolic_review:
                     print(f"Hyperbolic AI - Confidence: {hyperbolic_review['confidence']}%, Risk Score: {hyperbolic_review['risk_score']}/10")
                     print(f"Reasoning: {hyperbolic_review['reasoning']}")
-                if openrouter_review:
+                if self.openrouter_reviewer and openrouter_review:
                     print(f"OpenRouter AI - Confidence: {openrouter_review['confidence']}%, Risk Score: {openrouter_review['risk_score']}/10")
                     print(f"Reasoning: {openrouter_review['reasoning']}")
-                return
+                continue  # Continue avec le prochain token au lieu de return
 
     def monitor_positions(self):
         """

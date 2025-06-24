@@ -16,7 +16,8 @@ class DatabaseManager:
     """Core database operations for crypto configuration and bot command management"""
     
     def __init__(self):
-        self.db_path = 'trading_logs.db'
+        # Use environment variable if available, otherwise default to trading_logs.db
+        self.db_path = os.getenv('DB_PATH', 'trading_logs.db')
         logger.info(f"Initializing database at {self.db_path}")
         self._create_tables()
     

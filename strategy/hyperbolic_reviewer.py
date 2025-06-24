@@ -20,6 +20,9 @@ class HyperbolicReviewer:
         prompt = self._create_review_prompt(trade_data)
 
         try:
+            # Add timeout to prevent hanging
+            timeout = int(os.getenv('API_TIMEOUT', 10))
+            
             response = requests.post(
                 self.api_url,
                 headers=self.headers,
@@ -29,7 +32,8 @@ class HyperbolicReviewer:
                     "temperature": 0.1,
                     "max_tokens": 131072,
                     "top_p": 1
-                }
+                },
+                timeout=timeout
             )
             response.raise_for_status()
             analysis = response.json()["choices"][0]["message"]["content"]
@@ -45,6 +49,13 @@ class HyperbolicReviewer:
                     parsed_analysis["approval"] = True
 
             return parsed_analysis
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 401:
+                # Silently fail for unauthorized - API key not configured
+                return None
+            else:
+                print(f"Hyperbolic review failed: {str(e)}")
+                return None
         except Exception as e:
             print(f"Hyperbolic review failed: {str(e)}")
             return None
