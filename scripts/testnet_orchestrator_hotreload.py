@@ -11,8 +11,10 @@ import signal
 import subprocess
 import threading
 import requests
+import concurrent.futures
 from pathlib import Path
 from datetime import datetime
+from typing import List, Dict, Any, Optional
 
 class TestnetOrchestrator:
     def __init__(self, hot_reload=True):
@@ -21,6 +23,7 @@ class TestnetOrchestrator:
         self.running = True
         self.startup_complete = False
         self.hot_reload = hot_reload
+        self.startup_time = time.time()
         
         # Setup signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self.signal_handler)
@@ -116,7 +119,39 @@ class TestnetOrchestrator:
         self.log(f"❌ {name} failed to become ready within {max_wait}s", "ERROR")
         return False
         
-    def start_dashboard_backend(self):
+    def await_services_ready(self, services_to_check: List[Dict[str, Any]]) -> bool:
+        """
+        Performs health checks for multiple services concurrently.
+        Returns True if all services are healthy, False otherwise.
+        """
+        self.log("📡 Performing concurrent health checks...")
+        services_with_health_checks = [s for s in services_to_check if s.get("health_check_url")]
+        
+        if not services_with_health_checks:
+            self.log("ℹ️ No services require a health check.", "INFO")
+            return True
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(services_with_health_checks)) as executor:
+            future_to_service = {
+                executor.submit(self.wait_for_service, service['name'], service['health_check_url'], service['max_wait']): service
+                for service in services_with_health_checks
+            }
+            
+            all_healthy = True
+            for future in concurrent.futures.as_completed(future_to_service):
+                service = future_to_service[future]
+                try:
+                    is_healthy = future.result()
+                    if not is_healthy:
+                        all_healthy = False
+                        self.log(f"💔 Health check failed for {service['name']}", "ERROR")
+                except Exception as exc:
+                    all_healthy = False
+                    self.log(f"💥 Health check for {service['name']} generated an exception: {exc}", "CRITICAL")
+        
+        return all_healthy
+
+    def start_dashboard_backend(self) -> Optional[Dict[str, Any]]:
         """Start the dashboard backend with optional hot reload"""
         if self.hot_reload:
             # Check if jurigged is available
@@ -162,18 +197,15 @@ class TestnetOrchestrator:
         process = self.start_service("Dashboard Backend", backend_cmd)
         
         if process:
-            # Give more time for backend to start
-            time.sleep(5)
-            # Wait for backend to be ready with longer timeout
-            if self.wait_for_service("Dashboard Backend", "http://localhost:8000/health", max_wait=45):
-                self.log("🎯 Dashboard Backend ready at http://localhost:8000")
-                return True
-            else:
-                self.log("❌ Dashboard Backend failed to start properly", "ERROR")
-                return False
-        return False
+            return {
+                "name": "Dashboard Backend",
+                "process": process,
+                "health_check_url": "http://localhost:8000/health",
+                "max_wait": 45
+            }
+        return None
         
-    def start_dashboard_frontend(self):
+    def start_dashboard_frontend(self) -> Optional[Dict[str, Any]]:
         """Start the dashboard frontend"""
         frontend_dir = self.root_dir / "dashboard" / "frontend"
         
@@ -189,7 +221,7 @@ class TestnetOrchestrator:
                 exit_code = npm_install.wait()  # Wait for installation to complete
                 if exit_code != 0:
                     self.log(f"❌ NPM Install failed with exit code {exit_code}", "ERROR")
-                    return False
+                    return None
                 
         # Start the frontend dev server
         frontend_cmd = ["npm", "run", "dev"]
@@ -199,17 +231,15 @@ class TestnetOrchestrator:
         process = self.start_service("Dashboard Frontend", frontend_cmd, cwd=frontend_dir)
         
         if process:
-            # Wait for frontend to be ready
-            time.sleep(3)  # Give Vite some time to start
-            if self.wait_for_service("Dashboard Frontend", "http://localhost:5173", max_wait=15):
-                self.log("🎯 Dashboard Frontend ready at http://localhost:5173")
-                return True
-            else:
-                self.log("⚠️ Frontend may still be starting...", "WARNING")
-                return True  # Don't fail deployment for frontend issues
-        return False
+            return {
+                "name": "Dashboard Frontend",
+                "process": process,
+                "health_check_url": "http://localhost:5173",
+                "max_wait": 15
+            }
+        return None
         
-    def start_trading_bot(self):
+    def start_trading_bot(self) -> Optional[Dict[str, Any]]:
         """Start the main trading bot with optional hot reload"""
         if self.hot_reload:
             # Start with jurigged, watching all relevant directories
@@ -234,8 +264,12 @@ class TestnetOrchestrator:
         if process:
             reload_info = " with Hot Reload" if self.hot_reload else ""
             self.log(f"🤖 Trading Bot started{reload_info} and monitoring markets")
-            return True
-        return False
+            return {
+                "name": "Trading Bot",
+                "process": process,
+                "health_check_url": None
+            }
+        return None
         
     def monitor_processes(self):
         """Monitor all processes and handle termination"""
@@ -253,6 +287,9 @@ class TestnetOrchestrator:
                         
             time.sleep(5)  # Check every 5 seconds
             
+        self.log("Main monitoring loop has ended. Shutting down remaining services...")
+        self.shutdown_all_services()
+
     def print_status_dashboard(self):
         """Print current status and URLs"""
         mode_info = "🔥 HOT RELOAD" if self.hot_reload else "STANDARD"
@@ -293,6 +330,10 @@ class TestnetOrchestrator:
         print("   • Press Ctrl+C to shutdown gracefully")
         print("=" * 65)
         
+        uptime = time.time() - self.startup_time
+        self.log(f"🕒 Orchestrator uptime: {int(uptime)}s", "STATUS")
+        self.log("="*60, "STATUS")
+
     def shutdown_all_services(self):
         """Gracefully shutdown all services"""
         if not self.processes:
@@ -327,64 +368,59 @@ class TestnetOrchestrator:
                     self.log(f"⚠️ Error stopping {name}: {e}", "WARNING")
                     
         self.log("✅ All services stopped")
+        self.running = False
         
     def run_deployment(self):
-        """Run complete testnet deployment"""
-        self.log("🚀 Starting HyperLiquid AI Trading Bot - TESTNET Deployment")
-        self.log("=" * 60)
+        """Launches all services concurrently and waits for them to be healthy."""
+        self.log("🚀 Orchestrator starting parallel deployment...")
+        launched_services = []
+
+        # --- STEP 1: Launch all services concurrently ---
+        self.log("STEP 1: Launching all services...")
         
-        # Step 1: Start Dashboard Backend
-        if not self.start_dashboard_backend():
-            self.log("❌ Critical: Dashboard Backend failed to start", "ERROR")
-            return False
+        backend_service = self.start_dashboard_backend()
+        if backend_service:
+            launched_services.append(backend_service)
             
-        # Step 2: Start Dashboard Frontend
-        if not self.start_dashboard_frontend():
-            self.log("⚠️ Frontend startup issues - continuing anyway", "WARNING")
+        frontend_service = self.start_dashboard_frontend()
+        if frontend_service:
+            launched_services.append(frontend_service)
             
-        # Step 3: Start Trading Bot
-        if not self.start_trading_bot():
-            self.log("❌ Critical: Trading Bot failed to start", "ERROR")
-            return False
+        bot_service = self.start_trading_bot()
+        if bot_service:
+            launched_services.append(bot_service)
             
-        # Mark startup as complete
+        # --- CRITICAL CHECK: Ensure essential services were launched ---
+        essential_services = {"Dashboard Backend", "Trading Bot"}
+        launched_names = {s['name'] for s in launched_services}
+        if not essential_services.issubset(launched_names):
+            self.log("❌ CRITICAL: Failed to launch one or more essential services. Shutting down.", "CRITICAL")
+            self.running = False
+            self.shutdown_all_services()
+            return
+
+        # --- STEP 2: Perform concurrent health checks ---
+        self.log("STEP 2: Awaiting service health checks...")
+        all_systems_go = self.await_services_ready(launched_services)
+        
+        if not all_systems_go:
+            self.log("❌ One or more services failed the health check. Initiating shutdown.", "CRITICAL")
+            self.running = False
+            self.shutdown_all_services()
+            return
+            
+        # --- STEP 3: Finalization ---
+        self.log("✅ All services are up, running, and healthy.", "SUCCESS")
         self.startup_complete = True
         
-        # Show status dashboard
         self.print_status_dashboard()
         
-        # Start monitoring thread
-        monitor_thread = threading.Thread(target=self.monitor_processes, daemon=True)
-        monitor_thread.start()
-        
-        # Main loop - keep running until shutdown
-        self.log("✅ All services started - Bot is now active!")
-        self.log("📊 Monitor dashboard: http://localhost:8000")
-        self.log("🛑 Press Ctrl+C to shutdown gracefully")
-        
-        try:
-            # Status updates every 30 seconds
-            last_status = time.time()
-            
-            while self.running:
-                current_time = time.time()
-                
-                # Print status update every 30 seconds
-                if current_time - last_status > 30:
-                    active_processes = len([p for p in self.processes.values() if p.poll() is None])
-                    self.log(f"📊 Status: {active_processes}/{len(self.processes)} services running")
-                    last_status = current_time
-                    
-                time.sleep(1)
-                
-        except KeyboardInterrupt:
-            self.log("🛑 Keyboard interrupt received", "WARNING")
-            
-        return True
+        # Start monitoring loop
+        self.monitor_processes()
 
 
 def main():
-    """Main function to run the orchestrator with argument parsing"""
+    """Main entry point for the orchestrator script."""
     import argparse
     parser = argparse.ArgumentParser(
         description="HyperLiquid AI Trading Bot - Testnet Orchestrator with Hot Reload",

@@ -23,3 +23,6 @@ backups/
 
 # Trades
 *_trades.db
+
+# Tmp
+tmp/

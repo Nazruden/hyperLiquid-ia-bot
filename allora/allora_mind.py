@@ -468,7 +468,13 @@ class AlloraMind:
             perplexity_review = None
             if self.perplexity_reviewer:
                 print("   🔍 Calling Perplexity AI...")
-                perplexity_review = self.perplexity_reviewer.review_trade(trade_data)
+                try:
+                    perplexity_review = self.perplexity_reviewer.review_trade(trade_data)
+                except AttributeError as e:
+                    print(f"❌ CRITICAL: Perplexity review failed due to an internal error: {e}")
+                    print("   This is likely due to a non-JSON response from the API.")
+                    print("   Continuing without Perplexity validation for this cycle.")
+                    perplexity_review = None
                 
             print(f"✅ AI validation completed for {token}")
             
@@ -629,21 +635,30 @@ class AlloraMind:
         # Initial call to set mode based on startup config
         self.check_dashboard_commands()
 
-        while True:
-            if self.mode == 'ACTIVE':
-                print(f"\n🚀 AlloraMind is in ACTIVE mode. Monitoring for trades... ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})")
-                self.monitoring_enabled = True
-                self.open_trade()
-            elif self.mode == 'STANDBY':
-                if self.monitoring_enabled:
-                    print(f"\n🛑 AlloraMind is now in STANDBY mode. Trading is paused. ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})")
-                    self.monitoring_enabled = False
+        try:
+            while True:
+                if self.mode == 'ACTIVE':
+                    print(f"\n🚀 AlloraMind is in ACTIVE mode. Monitoring for trades... ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})")
+                    self.monitoring_enabled = True
+                    self.open_trade()
+                    
+                    print(f"\n🔄 Cycle complete. Waiting for {interval} seconds until next cycle...\n")
+                    time.sleep(interval) # Wait for the configured interval before the next cycle
+                elif self.mode == 'STANDBY':
+                    if self.monitoring_enabled:
+                        print(f"\n🟡 AlloraMind switched to STANDBY mode. Halting trade monitoring. ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})")
+                        self.monitoring_enabled = False
+                    
+                    # Sleep for a short duration in standby to remain responsive to commands
+                    time.sleep(self.command_check_interval)
+
+                # Check for commands regardless of mode
+                self.check_dashboard_commands()
             
-            # Check for commands regardless of mode
-            self.check_dashboard_commands()
-            
-            # Wait for the next cycle
-            time.sleep(self.command_check_interval)
+        except Exception as e:
+            print(f"An error occurred in the main loop: {e}")
+            print("Restarting bot in 10 seconds...")
+            time.sleep(10)
 
     def check_dashboard_commands(self):
         """Periodically checks for commands from the dashboard via the file system queue."""

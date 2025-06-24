@@ -3,14 +3,23 @@ from dotenv import load_dotenv
 
 class EnvLoader:
     def __init__(self):
-        # Explicitly find and load the .env file from the project root
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        # The project root is two levels up from the current file (utils/env_loader.py)
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        dotenv_testnet_path = os.path.join(project_root, '.env.testnet')
         dotenv_path = os.path.join(project_root, '.env')
-        
-        if os.path.exists(dotenv_path):
+
+        loaded_path = None
+        if os.path.exists(dotenv_testnet_path):
+            load_dotenv(dotenv_path=dotenv_testnet_path, override=True)
+            loaded_path = dotenv_testnet_path
+        elif os.path.exists(dotenv_path):
             load_dotenv(dotenv_path=dotenv_path, override=True)
+            loaded_path = dotenv_path
+        
+        if loaded_path:
+            print(f"✅ Loaded environment variables from: {os.path.basename(loaded_path)}")
         else:
-            print(f"Warning: .env file not found at {dotenv_path}. Relying on system environment variables.")
+            print(f"⚠️ Warning: No .env or .env.testnet file found. Relying on system environment variables.")
         
     def get_config(self):
         """

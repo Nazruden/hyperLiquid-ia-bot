@@ -178,7 +178,16 @@ Provide risk assessment with emphasis on volatility sources.
                 self.total_latency += latency
                 
                 response_data = response.json()
-                analysis = response_data["choices"][0]["message"]["content"]
+
+                # Robustness check: Ensure the response is a dictionary
+                if not isinstance(response_data, dict):
+                    # Raise an exception that can be caught by the generic handler
+                    raise ValueError(f"API returned a non-JSON object: {response_data}")
+
+                analysis = response_data.get("choices", [{}])[0].get("message", {}).get("content")
+                if not analysis:
+                    raise ValueError("API response is missing 'content' in choices.")
+
                 citations = response_data.get("citations", [])
                 
                 parsed_analysis = self._parse_enhanced_analysis(analysis, citations, trade_data)
@@ -202,30 +211,38 @@ Provide risk assessment with emphasis on volatility sources.
                     
                     return parsed_analysis
                 
-            except requests.exceptions.HTTPError as e:
-                if e.response.status_code == 401:
-                    print(f"⚠️ Perplexity API unauthorized - check API key configuration")
-                    return None
-                elif e.response.status_code == 429:  # Rate limit
-                    if attempt < self.max_retries - 1:
-                        wait_time = (self.backoff_factor ** attempt) * 2  # Increased backoff
-                        print(f"⏱️ Perplexity rate limited, retrying in {wait_time:.1f}s...")
-                        time.sleep(wait_time)
-                        continue
-                    else:
-                        print(f"🚫 Perplexity rate limit exceeded after {self.max_retries} attempts")
-                        return None
+            except requests.exceptions.RequestException as e:
+                error_summary = str(e)
+                # For HTTPError, provide a cleaner summary
+                if isinstance(e, requests.exceptions.HTTPError) and e.response is not None:
+                    error_summary = f"HTTP {e.response.status_code} - {e.response.reason}"
+                    if e.response.status_code == 401:
+                        print(f"🚫 Perplexity API unauthorized - check API key. Aborting retries.")
+                        return None # No point in retrying on auth error
+                    elif e.response.status_code == 429:
+                        error_summary += " (Rate Limit)"
+
+                if attempt < self.max_retries - 1:
+                    wait_time = (self.backoff_factor ** attempt) * 2
+                    print(f"⚠️ Perplexity request error (attempt {attempt + 1}/{self.max_retries}): {error_summary}. Retrying in {wait_time:.1f}s...")
+                    time.sleep(wait_time)
                 else:
-                    print(f"❌ Perplexity HTTP error: {e.response.status_code}")
-                    return None
+                    print(f"❌ Perplexity request failed after {self.max_retries} attempts: {error_summary}")
+            
+            except json.JSONDecodeError as e:
+                print(f"❌ Perplexity error: Failed to decode API response as JSON. Content: {response.text[:100]}...")
+                # No retry on malformed JSON, as it's a persistent issue
+                return None
+
             except Exception as e:
                 if attempt < self.max_retries - 1:
                     wait_time = (self.backoff_factor ** attempt)
-                    print(f"⚠️ Perplexity error (attempt {attempt + 1}): {str(e)}, retrying in {wait_time:.1f}s...")
+                    # Log a clean summary instead of the raw error object
+                    error_summary = f"{type(e).__name__}: {str(e)}"
+                    print(f"⚠️ An unexpected Perplexity error occurred (attempt {attempt + 1}/{self.max_retries}): {error_summary}. Retrying in {wait_time:.1f}s...")
                     time.sleep(wait_time)
-                    continue
                 else:
-                    print(f"❌ Perplexity failed after {self.max_retries} attempts: {str(e)}")
+                    print(f"❌ An unexpected Perplexity error occurred after {self.max_retries} attempts: {e}")
                     return None
 
         return None
@@ -283,6 +300,22 @@ Provide risk assessment with emphasis on volatility sources.
             if not parsed_data:
                 # Fallback: extract key metrics from text
                 return self._extract_fallback_metrics(analysis, citations, trade_data)
+            
+            # --- FIX: Ensure critical keys always exist for reliability ---
+            if "approval" not in parsed_data:
+                parsed_data["approval"] = False  # Default to not approved for safety
+            
+            if "risk_score" not in parsed_data:
+                parsed_data["risk_score"] = 10  # Default to max risk
+            
+            if "confidence" not in parsed_data:
+                # Estimate confidence from risk if not present, ensuring it's never a deal-breaker
+                risk = parsed_data.get("risk_score", 10)
+                parsed_data["confidence"] = max(0, 100 - (risk * 10))
+
+            if "reasoning" not in parsed_data:
+                parsed_data["reasoning"] = "No reasoning provided by API." # Add default reasoning
+            # --- END FIX ---
             
             # Enhance with metadata
             parsed_data["citations_count"] = len(citations)
@@ -355,38 +388,31 @@ Provide risk assessment with emphasis on volatility sources.
         return events
 
     def _assess_source_quality_enhanced(self, citations: list) -> str:
-        """
-        Enhanced source quality assessment with detailed scoring
-        """
         if not citations:
-            return "no_sources"
+            return "none"
+
+        high_quality_domains = ["reuters.com", "bloomberg.com", "wsj.com", "apnews.com", "coindesk.com", "cointelegraph.com", "theblock.co", "decrypt.co", "arxiv.org"]
+        medium_quality_domains = ["forbes.com", "businessinsider.com", "techcrunch.com", "wired.com"]
         
-        # Tiered quality assessment
-        tier_1_sources = [
-            'reuters.com', 'bloomberg.com', 'wsj.com', 'ft.com', 'sec.gov', 'cftc.gov'
-        ]
-        tier_2_sources = [
-            'coindesk.com', 'cointelegraph.com', 'theblock.co', 'decrypt.co', 
-            'coingecko.com', 'messari.io', 'defipulse.com'
-        ]
-        tier_3_sources = [
-            'newsbtc.com', 'bitcoinist.com', 'ambcrypto.com', 'cryptopotato.com'
-        ]
-        
-        quality_score = 0
-        source_count = len(citations)
-        
-        for citation in citations:
-            url = citation.get('url', '').lower()
-            if any(domain in url for domain in tier_1_sources):
-                quality_score += 3
-            elif any(domain in url for domain in tier_2_sources):
-                quality_score += 2
-            elif any(domain in url for domain in tier_3_sources):
-                quality_score += 1
-        
-        # Normalize score
-        avg_quality = quality_score / max(source_count, 1)
+        scores = []
+        for url in citations: # Directly iterate over URLs (which are strings)
+            try:
+                # The 'citation' is now just a URL string, so no .get() is needed.
+                domain = url.split('/')[2].replace("www.", "")
+                if domain in high_quality_domains:
+                    scores.append(3)
+                elif domain in medium_quality_domains:
+                    scores.append(2)
+                else:
+                    scores.append(1)
+            except IndexError:
+                # Handle cases where the URL might be malformed
+                scores.append(0)
+
+        if not scores:
+            return "low"
+
+        avg_quality = sum(scores) / len(scores)
         
         if avg_quality >= 2.5:
             return "very_high"

@@ -1,5 +1,6 @@
 import os
 import time
+import sqlite3
 from typing import Dict, Optional
 from database.db_manager import DatabaseManager
 
@@ -72,7 +73,7 @@ class AdaptiveThresholdCalculator:
         """
         try:
             # Récupérer performance 7 derniers jours
-            conn = self.db.get_connection()
+            conn = sqlite3.connect(self.db.db_path)
             cursor = conn.cursor()
             
             cursor.execute("""
@@ -170,7 +171,7 @@ class AdaptiveThresholdCalculator:
         Analyse la performance récente d'un token pour debugging
         """
         try:
-            conn = self.db.get_connection()
+            conn = sqlite3.connect(self.db.db_path)
             cursor = conn.cursor()
             
             cursor.execute("""
