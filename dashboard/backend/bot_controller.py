@@ -1,89 +1,86 @@
 """
-Bot Controller for Managing Trading Bot Lifecycle
-Handles start, stop, restart, and status operations with STANDBY/ACTIVE modes
+Refactored Bot Controller - Orchestrates bot process and mode management
+Uses modular controllers for better maintainability (≤350 lines)
+Key component for resolving dashboard state sync issues
 """
 
-import subprocess
-import psutil
 import logging
-import json
-import os
-import signal
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 import asyncio
 import sys
+import os
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
-from dashboard.backend.config_manager import ConfigManager
+from dashboard.backend.controllers.bot_process_controller import BotProcessController
+from dashboard.backend.controllers.bot_mode_controller import BotModeController
+from dashboard.backend.services.state_sync_service import StateSyncService
+from database.activity_logger import ActivityLogger
 
 logger = logging.getLogger(__name__)
 
 class BotController:
-    """Controls the trading bot process lifecycle with crypto management modes"""
+    """
+    Orchestrates bot operations using modular controllers
+    Handles both process lifecycle and mode management with state synchronization
+    """
     
-    def __init__(self):
-        self.bot_process: Optional[subprocess.Popen] = None
-        self.bot_pid: Optional[int] = None
-        self.bot_script_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 
-            "main.py"
-        )
+    def __init__(self, websocket_manager=None):
+        # Initialize specialized controllers
+        self.process_controller = BotProcessController()
+        self.mode_controller = BotModeController()
         
-        # Initialize config manager for crypto management
-        self.config_manager = ConfigManager()
+        # Initialize state sync service (key component for fixing sync issues)
+        self.state_sync_service = StateSyncService(websocket_manager)
         
-        # Extended status cache with mode support
+        # Connect WebSocket manager with state sync service (bidirectional)
+        if websocket_manager:
+            websocket_manager.set_state_sync_service(self.state_sync_service)
+            self.state_sync_service.set_websocket_manager(websocket_manager)
+        
+        # Connect mode controller to state sync
+        self.mode_controller.set_state_sync_service(self.state_sync_service)
+        
+        # Initialize activity logger for journal functionality
+        self.activity_logger = ActivityLogger()
+        
+        # Combined status cache
         self.status_cache = {
-            "status": "stopped",  # stopped, running
-            "mode": "STANDBY",    # STANDBY, ACTIVE
             "last_updated": datetime.now().isoformat(),
-            "uptime": 0,
-            "restart_count": 0,
-            "active_cryptos": {},
-            "monitoring_enabled": False
+            "initialization_complete": True
         }
+        
+        logger.info("BotController initialized with enhanced WebSocket integration")
+    
+    def set_websocket_manager(self, websocket_manager):
+        """Set WebSocket manager for real-time state synchronization"""
+        self.state_sync_service.set_websocket_manager(websocket_manager)
+        logger.info("WebSocket manager configured for bot controller")
     
     def get_status(self) -> Dict[str, Any]:
-        """Get current bot status"""
+        """Get comprehensive bot status from all controllers"""
         try:
-            # First check if we have a tracked process
-            if self.bot_process and self.bot_process.poll() is None:
-                # Bot is running (started by dashboard)
-                self.status_cache.update({
-                    "status": "running",
-                    "pid": self.bot_process.pid,
-                    "last_updated": datetime.now().isoformat()
-                })
-            elif self.bot_process and self.bot_process.poll() is not None:
-                # Bot process ended
-                self.status_cache.update({
-                    "status": "stopped",
-                    "pid": None,
-                    "last_updated": datetime.now().isoformat(),
-                    "exit_code": self.bot_process.returncode
-                })
-                self.bot_process = None
-            else:
-                # No tracked process - check for existing bot processes
-                running_bot_pid = self._find_running_bot_process()
-                if running_bot_pid:
-                    self.status_cache.update({
-                        "status": "running",
-                        "pid": running_bot_pid,
-                        "last_updated": datetime.now().isoformat(),
-                        "external_process": True  # Flag to indicate we didn't start this
-                    })
-                else:
-                    self.status_cache.update({
-                        "status": "stopped",
-                        "pid": None,
-                        "last_updated": datetime.now().isoformat()
-                    })
-                
-            return self.status_cache.copy()
+            # Get status from process controller
+            process_status = self.process_controller.get_status()
+            
+            # Get status from mode controller
+            mode_status = self.mode_controller.get_status()
+            
+            # Combine statuses
+            combined_status = {
+                **process_status,
+                **mode_status,
+                "last_updated": datetime.now().isoformat(),
+                "controllers": {
+                    "process": "healthy",
+                    "mode": "healthy",
+                    "sync": "healthy" if self.state_sync_service else "unavailable"
+                }
+            }
+            
+            return combined_status
             
         except Exception as e:
             logger.error(f"Error getting bot status: {e}")
@@ -93,106 +90,32 @@ class BotController:
                 "last_updated": datetime.now().isoformat()
             }
     
-    def _find_running_bot_process(self) -> Optional[int]:
-        """Find already-running bot processes (main.py)"""
-        try:
-            for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'cwd']):
-                try:
-                    # Check if this is a Python process running main.py
-                    if proc.info['name'] and 'python' in proc.info['name'].lower():
-                        cmdline = proc.info['cmdline']
-                        if cmdline and any('main.py' in arg for arg in cmdline):
-                            # Get the working directory of the process
-                            cwd = proc.info.get('cwd', '')
-                            
-                            # Check if this is our bot's main.py by looking at:
-                            # 1. Working directory contains 'hyperLiquid-ia-bot'
-                            # 2. Full path contains our script path
-                            # 3. Command line contains main.py
-                            if (any('hyperLiquid-ia-bot' in str(arg) for arg in cmdline) or
-                                'hyperLiquid-ia-bot' in cwd or
-                                any(self.bot_script_path in str(arg) for arg in cmdline)):
-                                logger.info(f"Found existing bot process: PID {proc.info['pid']}")
-                                logger.info(f"Command line: {' '.join(cmdline)}")
-                                logger.info(f"Working directory: {cwd}")
-                                return proc.info['pid']
-                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                    continue
-            
-            logger.info("No existing bot process found")
-            return None
-        except Exception as e:
-            logger.error(f"Error finding running bot process: {e}")
-            return None
+    # ===== BOT PROCESS LIFECYCLE METHODS =====
     
     async def start_bot(self) -> Dict[str, Any]:
-        """Start the trading bot"""
+        """Start the trading bot process"""
         try:
-            # Check if bot is already running
-            current_status = self.get_status()
-            if current_status["status"] == "running":
-                external_process = current_status.get("external_process", False)
-                pid = current_status.get("pid")
-                message = f"Bot is already running (PID: {pid})"
-                if external_process:
-                    message += " - started externally"
-                return {
-                    "success": False,
-                    "message": message,
-                    "status": current_status
-                }
+            result = await self.process_controller.start_bot()
             
-            # Verify bot script exists
-            if not os.path.exists(self.bot_script_path):
-                return {
-                    "success": False,
-                    "message": f"Bot script not found: {self.bot_script_path}",
-                    "status": current_status
-                }
+            # Sync process status change
+            if self.state_sync_service and result.get("success"):
+                await self.state_sync_service.sync_process_status_change(
+                    result["status"]
+                )
             
-            # Start the bot process
-            logger.info(f"Starting bot: {self.bot_script_path}")
+            # Log activity
+            if result.get("success"):
+                await self._log_activity(
+                    activity_type="BOT_PROCESS",
+                    title="Bot Process Started",
+                    description=f"Bot started successfully with PID: {result['status'].get('pid')}",
+                    severity="SUCCESS"
+                )
             
-            self.bot_process = subprocess.Popen(
-                [sys.executable, self.bot_script_path],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                cwd=os.path.dirname(self.bot_script_path)
-            )
+            return result
             
-            self.bot_pid = self.bot_process.pid
-            
-            # Wait a moment to check if it started successfully
-            await asyncio.sleep(2)
-            
-            if self.bot_process.poll() is None:
-                # Bot started successfully
-                self.status_cache["restart_count"] += 1
-                logger.info(f"Bot started successfully with PID: {self.bot_pid}")
-                
-                return {
-                    "success": True,
-                    "message": f"Bot started successfully with PID: {self.bot_pid}",
-                    "status": self.get_status()
-                }
-            else:
-                # Bot failed to start
-                stdout, stderr = self.bot_process.communicate()
-                error_msg = f"Bot failed to start. Exit code: {self.bot_process.returncode}"
-                
-                logger.error(f"{error_msg}\nStdout: {stdout}\nStderr: {stderr}")
-                
-                return {
-                    "success": False,
-                    "message": error_msg,
-                    "stdout": stdout,
-                    "stderr": stderr,
-                    "status": self.get_status()
-                }
-                
         except Exception as e:
-            logger.error(f"Error starting bot: {e}")
+            logger.error(f"Error in start_bot: {e}")
             return {
                 "success": False,
                 "message": f"Error starting bot: {str(e)}",
@@ -200,83 +123,29 @@ class BotController:
             }
     
     async def stop_bot(self) -> Dict[str, Any]:
-        """Stop the trading bot"""
+        """Stop the trading bot process"""
         try:
-            current_status = self.get_status()
+            result = await self.process_controller.stop_bot()
             
-            if current_status["status"] != "running":
-                return {
-                    "success": False,
-                    "message": "Bot is not running",
-                    "status": current_status
-                }
-            
-            # Handle external processes
-            if not self.bot_process and current_status.get("external_process"):
-                # Try to stop external process by PID
-                pid = current_status.get("pid")
-                if pid:
-                    try:
-                        import psutil
-                        proc = psutil.Process(pid)
-                        proc.terminate()
-                        logger.info(f"Terminated external bot process: PID {pid}")
-                        return {
-                            "success": True,
-                            "message": f"External bot process stopped (PID: {pid})",
-                            "status": self.get_status()
-                        }
-                    except psutil.NoSuchProcess:
-                        return {
-                            "success": False,
-                            "message": "External bot process no longer exists",
-                            "status": current_status
-                        }
-                    except Exception as e:
-                        return {
-                            "success": False,
-                            "message": f"Failed to stop external bot process: {str(e)}",
-                            "status": current_status
-                        }
-            
-            if not self.bot_process:
-                return {
-                    "success": False,
-                    "message": "No bot process found",
-                    "status": current_status
-                }
-            
-            logger.info(f"Stopping bot with PID: {self.bot_pid}")
-            
-            # Try graceful shutdown first
-            self.bot_process.terminate()
-            
-            # Wait for graceful shutdown
-            try:
-                await asyncio.wait_for(
-                    asyncio.create_task(self._wait_for_process_end()), 
-                    timeout=10.0
+            # Sync process status change
+            if self.state_sync_service:
+                await self.state_sync_service.sync_process_status_change(
+                    result["status"]
                 )
-                logger.info("Bot stopped gracefully")
-                
-            except asyncio.TimeoutError:
-                # Force kill if graceful shutdown failed
-                logger.warning("Bot didn't stop gracefully, forcing shutdown")
-                self.bot_process.kill()
-                await asyncio.create_task(self._wait_for_process_end())
-                logger.info("Bot force stopped")
             
-            self.bot_process = None
-            self.bot_pid = None
+            # Log activity
+            if result.get("success"):
+                await self._log_activity(
+                    activity_type="BOT_PROCESS",
+                    title="Bot Process Stopped",
+                    description="Bot process stopped successfully",
+                    severity="INFO"
+                )
             
-            return {
-                "success": True,
-                "message": "Bot stopped successfully",
-                "status": self.get_status()
-            }
+            return result
             
         except Exception as e:
-            logger.error(f"Error stopping bot: {e}")
+            logger.error(f"Error in stop_bot: {e}")
             return {
                 "success": False,
                 "message": f"Error stopping bot: {str(e)}",
@@ -284,40 +153,29 @@ class BotController:
             }
     
     async def restart_bot(self) -> Dict[str, Any]:
-        """Restart the trading bot"""
+        """Restart the trading bot process"""
         try:
-            logger.info("Restarting bot...")
+            result = await self.process_controller.restart_bot()
             
-            # Stop the bot first
-            stop_result = await self.stop_bot()
-            if not stop_result["success"] and "not running" not in stop_result["message"]:
-                return {
-                    "success": False,
-                    "message": f"Failed to stop bot during restart: {stop_result['message']}",
-                    "status": self.get_status()
-                }
+            # Sync process status change
+            if self.state_sync_service:
+                await self.state_sync_service.sync_process_status_change(
+                    result["status"]
+                )
             
-            # Wait a moment before starting
-            await asyncio.sleep(2)
+            # Log activity
+            if result.get("success"):
+                await self._log_activity(
+                    activity_type="BOT_PROCESS",
+                    title="Bot Process Restarted",
+                    description="Bot process restarted successfully",
+                    severity="SUCCESS"
+                )
             
-            # Start the bot
-            start_result = await self.start_bot()
+            return result
             
-            if start_result["success"]:
-                return {
-                    "success": True,
-                    "message": "Bot restarted successfully",
-                    "status": self.get_status()
-                }
-            else:
-                return {
-                    "success": False,
-                    "message": f"Failed to start bot during restart: {start_result['message']}",
-                    "status": self.get_status()
-                }
-                
         except Exception as e:
-            logger.error(f"Error restarting bot: {e}")
+            logger.error(f"Error in restart_bot: {e}")
             return {
                 "success": False,
                 "message": f"Error restarting bot: {str(e)}",
@@ -326,110 +184,34 @@ class BotController:
     
     async def get_bot_logs(self, lines: int = 50) -> Dict[str, Any]:
         """Get recent bot logs"""
-        try:
-            if not self.bot_process:
-                return {
-                    "success": False,
-                    "message": "Bot is not running",
-                    "logs": []
-                }
-            
-            # This is a simplified version - in production you'd want to read from log files
-            return {
-                "success": True,
-                "message": "Logs retrieved (simplified - implement log file reading)",
-                "logs": [
-                    "Log reading not implemented - check bot console output",
-                    f"Bot PID: {self.bot_pid}",
-                    f"Status: {self.get_status()['status']}"
-                ]
-            }
-            
-        except Exception as e:
-            logger.error(f"Error getting bot logs: {e}")
-            return {
-                "success": False,
-                "message": f"Error getting logs: {str(e)}",
-                "logs": []
-            }
-    
-    async def _wait_for_process_end(self):
-        """Wait for the bot process to end"""
-        while self.bot_process and self.bot_process.poll() is None:
-            await asyncio.sleep(0.1)
+        return await self.process_controller.get_bot_logs(lines)
     
     def get_system_resources(self) -> Dict[str, Any]:
         """Get system resource usage"""
-        try:
-            cpu_percent = psutil.cpu_percent(interval=1)
-            memory = psutil.virtual_memory()
-            disk = psutil.disk_usage('/')
-            
-            return {
-                "cpu_percent": cpu_percent,
-                "memory_percent": memory.percent,
-                "memory_used_gb": round(memory.used / (1024**3), 2),
-                "memory_total_gb": round(memory.total / (1024**3), 2),
-                "disk_percent": disk.percent,
-                "disk_used_gb": round(disk.used / (1024**3), 2),
-                "disk_total_gb": round(disk.total / (1024**3), 2)
-            }
-            
-        except Exception as e:
-            logger.error(f"Error getting system resources: {e}")
-            return {
-                "error": str(e)
-            }
-
-    # ===== CRYPTO MANAGEMENT & MODE CONTROL =====
+        return self.process_controller.get_system_resources()
+    
+    # ===== BOT MODE MANAGEMENT METHODS =====
     
     async def start_monitoring(self) -> Dict[str, Any]:
-        """Start bot in monitoring mode (transition from STANDBY to ACTIVE)"""
+        """Start bot monitoring (STANDBY -> ACTIVE)"""
         try:
-            # Check if we have active cryptos to monitor
-            active_cryptos = self.config_manager.get_active_cryptos_for_bot()
+            # This is the key fix for the dashboard sync issue
+            result = await self.mode_controller.start_monitoring()
             
-            if not active_cryptos:
-                return {
-                    "success": False,
-                    "message": "Cannot start monitoring: No active cryptocurrencies configured",
-                    "status": self.get_status()
-                }
+            # The mode controller already handles WebSocket sync via state_sync_service
+            # Log activity for journal
+            if result.get("success"):
+                await self._log_activity(
+                    activity_type="MODE_CHANGE",
+                    title="Monitoring Started",
+                    description=f"Bot monitoring activated with {len(result['status'].get('active_cryptos', {}))} cryptocurrencies",
+                    severity="SUCCESS"
+                )
             
-            # Start the bot if not already running
-            if self.get_status()["status"] != "running":
-                start_result = await self.start_bot()
-                if not start_result["success"]:
-                    return {
-                        "success": False,
-                        "message": f"Failed to start bot: {start_result['message']}",
-                        "status": self.get_status()
-                    }
-            
-            # Set mode to ACTIVE and enable monitoring
-            self.status_cache.update({
-                "mode": "ACTIVE",
-                "monitoring_enabled": True,
-                "active_cryptos": active_cryptos,
-                "last_updated": datetime.now().isoformat()
-            })
-            
-            # Send command to bot to start monitoring
-            self.config_manager.db.add_bot_command('SET_MODE_ACTIVE', {
-                "active_cryptos": active_cryptos,
-                "mode": "ACTIVE"
-            })
-            
-            logger.info(f"Bot monitoring started with {len(active_cryptos)} cryptocurrencies")
-            
-            return {
-                "success": True,
-                "message": f"Monitoring started with {len(active_cryptos)} active cryptocurrencies",
-                "status": self.get_status()
-            }
+            return result
             
         except Exception as e:
-            logger.error(f"Error starting monitoring: {e}")
+            logger.error(f"Error in start_monitoring: {e}")
             return {
                 "success": False,
                 "message": f"Error starting monitoring: {str(e)}",
@@ -437,30 +219,23 @@ class BotController:
             }
     
     async def set_standby_mode(self) -> Dict[str, Any]:
-        """Set bot to STANDBY mode (stop monitoring but keep bot running)"""
+        """Set bot to STANDBY mode"""
         try:
-            # Update status to STANDBY
-            self.status_cache.update({
-                "mode": "STANDBY",
-                "monitoring_enabled": False,
-                "last_updated": datetime.now().isoformat()
-            })
+            result = await self.mode_controller.set_standby_mode()
             
-            # Send command to bot to set standby mode
-            self.config_manager.db.add_bot_command('SET_MODE_STANDBY', {
-                "mode": "STANDBY"
-            })
+            # Log activity
+            if result.get("success"):
+                await self._log_activity(
+                    activity_type="MODE_CHANGE",
+                    title="Standby Mode Set",
+                    description="Bot set to STANDBY mode - monitoring paused",
+                    severity="INFO"
+                )
             
-            logger.info("Bot set to STANDBY mode")
-            
-            return {
-                "success": True,
-                "message": "Bot set to STANDBY mode - monitoring paused",
-                "status": self.get_status()
-            }
+            return result
             
         except Exception as e:
-            logger.error(f"Error setting standby mode: {e}")
+            logger.error(f"Error in set_standby_mode: {e}")
             return {
                 "success": False,
                 "message": f"Error setting standby mode: {str(e)}",
@@ -468,32 +243,23 @@ class BotController:
             }
     
     async def update_crypto_config(self, crypto_updates: Dict[str, Any]) -> Dict[str, Any]:
-        """Update crypto configuration and notify bot"""
+        """Update crypto configuration"""
         try:
-            # Update local status cache
-            active_cryptos = self.config_manager.get_active_cryptos_for_bot()
-            self.status_cache.update({
-                "active_cryptos": active_cryptos,
-                "last_updated": datetime.now().isoformat()
-            })
+            result = await self.mode_controller.update_crypto_config(crypto_updates)
             
-            # Send real-time update to bot
-            self.config_manager.db.add_bot_command('UPDATE_CRYPTO_CONFIG', {
-                "active_cryptos": active_cryptos,
-                "updates": crypto_updates
-            })
+            # Log activity
+            if result.get("success"):
+                await self._log_activity(
+                    activity_type="CONFIG_CHANGE",
+                    title="Crypto Configuration Updated",
+                    description=f"Configuration updated for {len(result.get('active_cryptos', {}))} cryptocurrencies",
+                    severity="INFO"
+                )
             
-            logger.info(f"Crypto configuration updated: {len(active_cryptos)} active cryptos")
-            
-            return {
-                "success": True,
-                "message": f"Crypto configuration updated successfully",
-                "active_cryptos": active_cryptos,
-                "status": self.get_status()
-            }
+            return result
             
         except Exception as e:
-            logger.error(f"Error updating crypto config: {e}")
+            logger.error(f"Error in update_crypto_config: {e}")
             return {
                 "success": False,
                 "message": f"Error updating crypto config: {str(e)}",
@@ -502,58 +268,130 @@ class BotController:
     
     def get_bot_mode_status(self) -> Dict[str, Any]:
         """Get detailed bot mode and crypto status"""
-        try:
-            # Update active cryptos from config manager
-            active_cryptos = self.config_manager.get_active_cryptos_for_bot()
-            self.status_cache["active_cryptos"] = active_cryptos
-            
-            # Get bot process status
-            process_status = self.get_status()
-            
-            return {
-                "success": True,
-                "data": {
-                    "mode": self.status_cache["mode"],
-                    "monitoring_enabled": self.status_cache["monitoring_enabled"],
-                    "active_cryptos": active_cryptos,
-                    "status": process_status["status"],
-                    "pid": process_status.get("pid"),
-                    "uptime": process_status.get("uptime", 0),
-                    "last_updated": datetime.now().isoformat()
-                }
-            }
-            
-        except Exception as e:
-            logger.error(f"Error getting bot mode status: {e}")
-            return {
-                "success": False,
-                "message": f"Error getting bot mode status: {str(e)}",
-                "data": {}
-            }
+        return self.mode_controller.get_bot_mode_status()
     
     async def initialize_with_standby(self) -> Dict[str, Any]:
-        """Initialize bot in STANDBY mode (for startup)"""
+        """Initialize bot in STANDBY mode"""
         try:
-            # Set initial mode to STANDBY
-            self.status_cache.update({
-                "mode": "STANDBY",
-                "monitoring_enabled": False,
-                "active_cryptos": {},
-                "last_updated": datetime.now().isoformat()
-            })
+            result = await self.mode_controller.initialize_with_standby()
             
-            logger.info("Bot controller initialized in STANDBY mode")
+            # Log initialization
+            await self._log_activity(
+                activity_type="SYSTEM",
+                title="Bot Controller Initialized",
+                description="Bot controller initialized in STANDBY mode with modular architecture",
+                severity="INFO"
+            )
             
-            return {
-                "success": True,
-                "message": "Bot controller initialized in STANDBY mode",
-                "status": self.get_status()
-            }
+            return result
             
         except Exception as e:
-            logger.error(f"Error initializing with standby: {e}")
+            logger.error(f"Error in initialize_with_standby: {e}")
             return {
                 "success": False,
                 "message": f"Error initializing: {str(e)}",
                 "status": self.get_status()
-            } 
+            }
+    
+    # ===== CRYPTO MANAGEMENT HELPERS =====
+    
+    async def activate_crypto(self, symbol: str) -> Dict[str, Any]:
+        """Activate a single cryptocurrency"""
+        result = await self.mode_controller.activate_crypto(symbol)
+        
+        if result.get("success"):
+            await self._log_activity(
+                activity_type="CRYPTO_MANAGEMENT",
+                title=f"Crypto Activated",
+                description=f"Cryptocurrency {symbol} activated for monitoring",
+                severity="SUCCESS"
+            )
+        
+        return result
+    
+    async def deactivate_crypto(self, symbol: str) -> Dict[str, Any]:
+        """Deactivate a single cryptocurrency"""
+        result = await self.mode_controller.deactivate_crypto(symbol)
+        
+        if result.get("success"):
+            await self._log_activity(
+                activity_type="CRYPTO_MANAGEMENT",
+                title=f"Crypto Deactivated",
+                description=f"Cryptocurrency {symbol} deactivated from monitoring",
+                severity="INFO"
+            )
+        
+        return result
+    
+    def get_active_cryptos_summary(self) -> Dict[str, Any]:
+        """Get summary of active cryptocurrencies"""
+        return self.mode_controller.get_active_cryptos_summary()
+    
+    # ===== ACTIVITY LOGGING & SYNCHRONIZATION =====
+    
+    async def _log_activity(self, activity_type: str, title: str, description: str, 
+                          severity: str = "INFO", token: str = None, data: Dict[str, Any] = None):
+        """Internal method to log activity and sync to dashboard"""
+        try:
+            activity_data = {
+                "id": f"{datetime.now().timestamp()}",
+                "timestamp": datetime.now().isoformat(),
+                "activity_type": activity_type,
+                "token": token,
+                "title": title,
+                "description": description,
+                "severity": severity,
+                "data": data or {}
+            }
+            
+            # Sync to dashboard via WebSocket
+            if self.state_sync_service:
+                await self.state_sync_service.sync_activity_update(activity_data)
+            
+        except Exception as e:
+            logger.error(f"Error logging activity: {e}")
+    
+    async def get_recent_activity(self, limit: int = 50, filters: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Get recent activity for dashboard journal"""
+        try:
+            activities = self.activity_logger.get_recent_activity(limit, filters)
+            
+            return {
+                "success": True,
+                "data": activities,
+                "count": len(activities)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting recent activity: {e}")
+            return {
+                "success": False,
+                "message": f"Error getting recent activity: {str(e)}",
+                "data": []
+            }
+    
+    # ===== STATE SYNCHRONIZATION METHODS =====
+    
+    async def send_full_state_sync(self, client_id: str = None):
+        """Send full state sync to dashboard client(s)"""
+        if self.state_sync_service:
+            return await self.state_sync_service.send_full_state_sync(client_id)
+        return False
+    
+    def get_sync_service_status(self) -> Dict[str, Any]:
+        """Get state sync service health status"""
+        if self.state_sync_service:
+            return asyncio.run(self.state_sync_service.health_check())
+        return {"service_status": "unavailable"}
+    
+    # ===== BACKWARD COMPATIBILITY METHODS =====
+    
+    async def get_status_with_crypto_info(self) -> Dict[str, Any]:
+        """Backward compatibility method for combined status"""
+        status = self.get_status()
+        crypto_summary = self.get_active_cryptos_summary()
+        
+        return {
+            **status,
+            "crypto_summary": crypto_summary
+        } 

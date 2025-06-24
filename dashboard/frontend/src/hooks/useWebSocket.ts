@@ -13,15 +13,62 @@ interface UseWebSocketOptions {
   initialDelay?: number;
 }
 
+// Enhanced interface for state sync support
+interface BotModeState {
+  mode: "STANDBY" | "ACTIVE";
+  monitoring_enabled: boolean;
+  active_cryptos: Record<string, unknown>;
+  crypto_count: number;
+  last_updated?: string;
+}
+
+interface BotProcessState {
+  status: "running" | "stopped" | "starting" | "stopping";
+  pid?: number;
+  uptime: number;
+  external_process?: boolean;
+  restart_count?: number;
+  last_updated?: string;
+}
+
+interface ActivityItem {
+  id: string;
+  timestamp: string;
+  activity_type: string;
+  token?: string;
+  title: string;
+  description: string;
+  severity: "SUCCESS" | "INFO" | "WARNING" | "ERROR";
+  data?: Record<string, unknown>;
+}
+
 interface UseWebSocketReturn {
   isConnected: boolean;
   connectionError: string | null;
   lastMessage: WebSocketMessage | null;
   botStatus: BotStatus | null;
   liveMetrics: LiveMetrics | null;
+
+  // Enhanced state sync support
+  botModeState: BotModeState | null;
+  botProcessState: BotProcessState | null;
+  activityStream: ActivityItem[];
+
+  // Connection methods
   connect: () => void;
   disconnect: () => void;
   sendMessage: (message: Record<string, unknown>) => void;
+
+  // State sync methods
+  requestFullStateSync: () => void;
+  clearActivityStream: () => void;
+
+  // Connection stats
+  connectionStats: {
+    totalMessages: number;
+    lastHeartbeat?: string;
+    connectionTime?: string;
+  };
 }
 
 export const useWebSocket = (
@@ -32,14 +79,26 @@ export const useWebSocket = (
     autoConnect = true,
     reconnectAttempts = 5,
     reconnectInterval = 3000,
-    initialDelay = 2000, // Add initial delay to wait for server readiness
+    initialDelay = 2000,
   } = options;
 
+  // Existing state
   const [isConnected, setIsConnected] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [lastMessage, setLastMessage] = useState<WebSocketMessage | null>(null);
   const [botStatus, setBotStatus] = useState<BotStatus | null>(null);
   const [liveMetrics, setLiveMetrics] = useState<LiveMetrics | null>(null);
+
+  // Enhanced state sync support
+  const [botModeState, setBotModeState] = useState<BotModeState | null>(null);
+  const [botProcessState, setBotProcessState] =
+    useState<BotProcessState | null>(null);
+  const [activityStream, setActivityStream] = useState<ActivityItem[]>([]);
+  const [connectionStats, setConnectionStats] = useState({
+    totalMessages: 0,
+    lastHeartbeat: undefined as string | undefined,
+    connectionTime: undefined as string | undefined,
+  });
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectCountRef = useRef(0);
@@ -49,7 +108,6 @@ export const useWebSocket = (
   // Health check function to verify server readiness
   const checkServerHealth = useCallback(async (): Promise<boolean> => {
     try {
-      // Create a timeout promise
       const timeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error("Health check timeout")), 5000)
       );
@@ -66,6 +124,154 @@ export const useWebSocket = (
         error
       );
       return false;
+    }
+  }, []);
+
+  // Enhanced message handler for state sync
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleWebSocketMessage = useCallback((message: any) => {
+    console.log("Received WebSocket message:", message);
+
+    // Update message stats
+    setConnectionStats((prev) => ({
+      ...prev,
+      totalMessages: prev.totalMessages + 1,
+    }));
+
+    setLastMessage({
+      type: message.type,
+      data: message.data,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Handle different message types
+    switch (message.type) {
+      case "connection":
+        console.log("✅ WebSocket connection acknowledged:", message.status);
+        break;
+
+      case "snapshot":
+        console.log("📊 Received data snapshot");
+        if (message.data?.bot_status) {
+          setBotStatus(message.data.bot_status);
+        }
+        if (message.data?.metrics) {
+          setLiveMetrics(message.data.metrics);
+        }
+        break;
+
+      // ===== STATE SYNC MESSAGE HANDLERS =====
+      case "full_state_sync":
+        console.log("🔄 Received full state sync");
+        if (message.data?.bot_mode) {
+          setBotModeState(message.data.bot_mode);
+        }
+        if (message.data?.bot_process) {
+          setBotProcessState(message.data.bot_process);
+        }
+        if (message.data?.activity_stream) {
+          setActivityStream(message.data.activity_stream);
+        }
+        break;
+
+      case "state_sync_mode_change":
+      case "bot_mode_update":
+        console.log("🔄 Bot mode state updated:", message.data);
+        setBotModeState(message.data);
+        break;
+
+      case "state_sync_process_status":
+      case "bot_process_update":
+        console.log("🔄 Bot process state updated:", message.data);
+        setBotProcessState(message.data);
+        break;
+
+      case "state_sync_crypto_config":
+      case "crypto_config_update":
+        console.log("🔄 Crypto config updated:", message.data);
+        setBotModeState((prev) =>
+          prev
+            ? {
+                ...prev,
+                active_cryptos: message.data.active_cryptos || {},
+                crypto_count: message.data.crypto_count || 0,
+                last_updated: message.data.timestamp,
+              }
+            : null
+        );
+        break;
+
+      case "crypto_activation_update":
+        console.log("🔄 Crypto activation updated:", message.data);
+        setBotModeState((prev) =>
+          prev
+            ? {
+                ...prev,
+                active_cryptos: message.data.active_cryptos || {},
+                last_updated: message.data.timestamp,
+              }
+            : null
+        );
+        break;
+
+      case "activity_update":
+        console.log("📝 New activity:", message.data);
+        if (message.data?.activity) {
+          setActivityStream((prev) => {
+            const newStream = [...prev, message.data.activity];
+            // Keep only last 100 activities
+            return newStream.slice(-100);
+          });
+        }
+        break;
+
+      // ===== LEGACY MESSAGE HANDLERS =====
+      case "bot_status":
+        setBotStatus(message.data);
+        break;
+
+      case "live_metrics":
+        setLiveMetrics(message.data);
+        break;
+
+      case "new_trade":
+      case "position_update":
+      case "ai_insight":
+      case "alert":
+        // These are handled by the lastMessage state
+        break;
+
+      case "heartbeat":
+        setConnectionStats((prev) => ({
+          ...prev,
+          lastHeartbeat: message.timestamp,
+        }));
+        break;
+
+      case "pong":
+        // Handle pong response
+        break;
+
+      case "ping":
+        // Respond to server ping
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({ type: "pong" }));
+        }
+        break;
+
+      case "health_check":
+        console.log("🏥 Health check from server");
+        break;
+
+      case "state_reset":
+        console.log("🔄 State reset received");
+        setBotModeState(message.data?.bot_mode || null);
+        setBotProcessState(message.data?.bot_process || null);
+        setActivityStream([]);
+        break;
+
+      default:
+        console.log("Unknown message type:", message.type);
     }
   }, []);
 
@@ -102,7 +308,7 @@ export const useWebSocket = (
             scheduleReconnect();
           }
         }
-      }, 10000); // 10 second timeout
+      }, 10000);
 
       ws.onopen = () => {
         clearTimeout(connectionTimeout);
@@ -111,6 +317,19 @@ export const useWebSocket = (
         setConnectionError(null);
         reconnectCountRef.current = 0;
         initialConnectionAttemptedRef.current = true;
+
+        // Update connection stats
+        setConnectionStats((prev) => ({
+          ...prev,
+          connectionTime: new Date().toISOString(),
+        }));
+
+        // Request full state sync on connection
+        setTimeout(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "request_full_state_sync" }));
+          }
+        }, 100);
       };
 
       ws.onclose = (event) => {
@@ -146,51 +365,7 @@ export const useWebSocket = (
       ws.onmessage = (event) => {
         try {
           const message = JSON.parse(event.data);
-          console.log("Received WebSocket message:", message);
-
-          setLastMessage({
-            type: message.type,
-            data: message.data,
-            timestamp: new Date().toISOString(),
-          });
-
-          // Handle different message types
-          switch (message.type) {
-            case "connection":
-              // Connection acknowledgment from server
-              console.log(
-                "✅ WebSocket connection acknowledged:",
-                message.status
-              );
-              break;
-            case "snapshot":
-              // Initial data snapshot from server
-              console.log("📊 Received data snapshot");
-              if (message.data?.bot_status) {
-                setBotStatus(message.data.bot_status);
-              }
-              if (message.data?.metrics) {
-                setLiveMetrics(message.data.metrics);
-              }
-              break;
-            case "bot_status":
-              setBotStatus(message.data);
-              break;
-            case "live_metrics":
-              setLiveMetrics(message.data);
-              break;
-            case "new_trade":
-            case "position_update":
-            case "ai_insight":
-            case "alert":
-              // These are handled by the lastMessage state
-              break;
-            case "pong":
-              // Handle pong response (don't log as unknown)
-              break;
-            default:
-              console.log("Unknown message type:", message.type);
-          }
+          handleWebSocketMessage(message);
         } catch (error) {
           console.error("Error parsing WebSocket message:", error);
         }
@@ -201,7 +376,7 @@ export const useWebSocket = (
       console.error("Error creating WebSocket:", error);
       setConnectionError("Failed to create WebSocket connection");
     }
-  }, [url, reconnectAttempts, checkServerHealth]);
+  }, [url, reconnectAttempts, checkServerHealth, handleWebSocketMessage]);
 
   const scheduleReconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {
@@ -210,12 +385,12 @@ export const useWebSocket = (
 
     reconnectCountRef.current += 1;
 
-    // Exponential backoff with jitter for better reconnection behavior
+    // Exponential backoff with jitter
     const baseDelay = reconnectInterval;
     const exponentialDelay =
       baseDelay * Math.pow(2, reconnectCountRef.current - 1);
-    const maxDelay = 30000; // Cap at 30 seconds
-    const jitter = Math.random() * 1000; // Add up to 1 second of jitter
+    const maxDelay = 30000;
+    const jitter = Math.random() * 1000;
     const finalDelay = Math.min(exponentialDelay + jitter, maxDelay);
 
     console.log(
@@ -232,13 +407,11 @@ export const useWebSocket = (
   const disconnect = useCallback(() => {
     console.log("Disconnecting WebSocket");
 
-    // Clear any pending reconnection
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
     }
 
-    // Close WebSocket
     if (wsRef.current) {
       wsRef.current.close(1000, "Manual disconnect");
       wsRef.current = null;
@@ -258,10 +431,18 @@ export const useWebSocket = (
     }
   }, []);
 
+  // Enhanced state sync methods
+  const requestFullStateSync = useCallback(() => {
+    sendMessage({ type: "request_full_state_sync" });
+  }, [sendMessage]);
+
+  const clearActivityStream = useCallback(() => {
+    setActivityStream([]);
+  }, []);
+
   // Auto-connect on mount with initial delay
   useEffect(() => {
     if (autoConnect) {
-      // Add initial delay to let the server fully start up
       const initialTimeout = setTimeout(() => {
         connect();
       }, initialDelay);
@@ -269,7 +450,6 @@ export const useWebSocket = (
       return () => clearTimeout(initialTimeout);
     }
 
-    // Cleanup on unmount
     return () => {
       disconnect();
     };
@@ -283,7 +463,7 @@ export const useWebSocket = (
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         sendMessage({ type: "ping" });
       }
-    }, 30000); // Ping every 30 seconds
+    }, 30000);
 
     return () => clearInterval(pingInterval);
   }, [isConnected, sendMessage]);
@@ -294,8 +474,22 @@ export const useWebSocket = (
     lastMessage,
     botStatus,
     liveMetrics,
+
+    // Enhanced state sync support
+    botModeState,
+    botProcessState,
+    activityStream,
+
+    // Connection methods
     connect,
     disconnect,
     sendMessage,
+
+    // State sync methods
+    requestFullStateSync,
+    clearActivityStream,
+
+    // Connection stats
+    connectionStats,
   };
 };

@@ -1,39 +1,30 @@
+"""
+Core Database Manager - Handles crypto configuration and bot commands
+Refactored to focus on core database operations (≤350 lines)
+"""
+
 import sqlite3
 from datetime import datetime
 import os
 import json
 from colorama import Fore, Style
+import logging
+
+logger = logging.getLogger(__name__)
 
 class DatabaseManager:
+    """Core database operations for crypto configuration and bot command management"""
+    
     def __init__(self):
         self.db_path = 'trading_logs.db'
-        print(f"Initializing database at {self.db_path}")  # Debug print
+        logger.info(f"Initializing database at {self.db_path}")
         self._create_tables()
     
     def _create_tables(self):
-        """
-        Create tables if they don't exist
-        """
-        print("Creating tables...")  # Debug print
+        """Create core database tables"""
+        logger.info("Creating core database tables...")
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
-        # Original trade logs table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS trade_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                token TEXT,
-                current_price REAL,
-                allora_prediction REAL,
-                prediction_difference_percent REAL,
-                volatility_24h REAL,
-                trade_direction TEXT,
-                entry_price REAL,
-                market_condition TEXT,
-                reason TEXT
-            )
-        """)
         
         # Crypto configuration table
         cursor.execute("""
@@ -67,64 +58,7 @@ class DatabaseManager:
         
         conn.commit()
         conn.close()
-        print(f"Database initialized successfully with crypto management tables")  # Debug print
-
-    def log_trade(self, trade_data):
-        log_id = datetime.now().strftime("%Y%m%d%H%M%S")  # Unique log ID based on timestamp
-        print(f"{Fore.GREEN}[LOG-{log_id}] Attempting to log trade:{Style.RESET_ALL}")
-        print(f"  {Fore.CYAN}Token:{Style.RESET_ALL} {trade_data['token']}")
-        print(f"  {Fore.CYAN}Current Price:{Style.RESET_ALL} ${trade_data['current_price']:.2f}")
-        print(f"  {Fore.CYAN}Prediction:{Style.RESET_ALL} ${trade_data['allora_prediction']:.2f}")
-        print(f"  {Fore.CYAN}Difference:{Style.RESET_ALL} {trade_data['prediction_diff']:.2f}%")
-        print(f"  {Fore.CYAN}Volatility:{Style.RESET_ALL} {trade_data['volatility']}")
-        print(f"  {Fore.CYAN}Direction:{Style.RESET_ALL} {trade_data['direction']}")
-        print(f"  {Fore.CYAN}Entry Price:{Style.RESET_ALL} ${trade_data['entry_price']:.2f}")
-        print(f"  {Fore.CYAN}Market Condition:{Style.RESET_ALL} {trade_data['market_condition']}")
-        print(f"  {Fore.CYAN}Reason:{Style.RESET_ALL} {trade_data.get('reason', 'N/A')}")
-
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-
-        try:
-            cursor.execute("""
-                INSERT INTO trade_logs (
-                    timestamp, token, current_price, allora_prediction, 
-                    prediction_difference_percent, volatility_24h,
-                    trade_direction, entry_price, market_condition, reason
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                datetime.now(),
-                trade_data['token'],
-                trade_data['current_price'],
-                trade_data['allora_prediction'],
-                trade_data['prediction_diff'],
-                trade_data['volatility'],
-                trade_data['direction'],
-                trade_data['entry_price'],
-                trade_data['market_condition'],
-                trade_data.get('reason', None)
-            ))
-
-            conn.commit()
-            print(f"{Fore.GREEN}[LOG-{log_id}] Trade successfully logged.{Style.RESET_ALL}")
-
-        except Exception as e:
-            print(f"{Fore.RED}[LOG-{log_id}] Error logging trade: {str(e)}{Style.RESET_ALL}")
-        finally:
-            conn.close()
-    
-    def update_trade_result(self, trade_id, exit_price, profit_loss, result):
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            UPDATE trade_logs 
-            SET exit_price = ?, profit_loss_percent = ?, trade_result = ?
-            WHERE id = ?
-        """, (exit_price, profit_loss, result, trade_id))
-        
-        conn.commit()
-        conn.close()
+        logger.info("Core database tables initialized successfully")
 
     # ===== CRYPTO CONFIGURATION METHODS =====
     
@@ -133,49 +67,61 @@ class DatabaseManager:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        cursor.execute("""
-            SELECT symbol, topic_id, is_active, availability, 
-                   hyperliquid_available, allora_available, 
-                   last_price, volume_24h, updated_at
-            FROM crypto_configs
-            ORDER BY symbol
-        """)
-        
-        configs = []
-        for row in cursor.fetchall():
-            configs.append({
-                'symbol': row[0],
-                'topic_id': row[1],
-                'is_active': bool(row[2]),
-                'availability': row[3],
-                'hyperliquid_available': bool(row[4]),
-                'allora_available': bool(row[5]),
-                'last_price': row[6],
-                'volume_24h': row[7],
-                'updated_at': row[8]
-            })
-        
-        conn.close()
-        return configs
+        try:
+            cursor.execute("""
+                SELECT symbol, topic_id, is_active, availability, 
+                       hyperliquid_available, allora_available, 
+                       last_price, volume_24h, updated_at
+                FROM crypto_configs
+                ORDER BY symbol
+            """)
+            
+            configs = []
+            for row in cursor.fetchall():
+                configs.append({
+                    'symbol': row[0],
+                    'topic_id': row[1],
+                    'is_active': bool(row[2]),
+                    'availability': row[3],
+                    'hyperliquid_available': bool(row[4]),
+                    'allora_available': bool(row[5]),
+                    'last_price': row[6],
+                    'volume_24h': row[7],
+                    'updated_at': row[8]
+                })
+            
+            return configs
+            
+        except Exception as e:
+            logger.error(f"Error getting crypto configs: {e}")
+            return []
+        finally:
+            conn.close()
     
     def get_active_cryptos(self):
         """Get only active crypto configurations"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        cursor.execute("""
-            SELECT symbol, topic_id 
-            FROM crypto_configs 
-            WHERE is_active = TRUE
-            ORDER BY symbol
-        """)
-        
-        active_cryptos = {}
-        for row in cursor.fetchall():
-            active_cryptos[row[0]] = row[1]  # {symbol: topic_id}
-        
-        conn.close()
-        return active_cryptos
+        try:
+            cursor.execute("""
+                SELECT symbol, topic_id 
+                FROM crypto_configs 
+                WHERE is_active = TRUE
+                ORDER BY symbol
+            """)
+            
+            active_cryptos = {}
+            for row in cursor.fetchall():
+                active_cryptos[row[0]] = row[1]  # {symbol: topic_id}
+            
+            return active_cryptos
+            
+        except Exception as e:
+            logger.error(f"Error getting active cryptos: {e}")
+            return {}
+        finally:
+            conn.close()
     
     def add_crypto_config(self, symbol, topic_id, availability, 
                         hyperliquid_available=None, allora_available=None):
@@ -201,10 +147,12 @@ class DatabaseManager:
             ))
             
             conn.commit()
-            return cursor.lastrowid
+            config_id = cursor.lastrowid
+            logger.info(f"Added crypto config: {symbol} (ID: {config_id})")
+            return config_id
             
         except Exception as e:
-            print(f"Error adding crypto config: {e}")
+            logger.error(f"Error adding crypto config for {symbol}: {e}")
             return None
         finally:
             conn.close()
@@ -230,11 +178,14 @@ class DatabaseManager:
             ))
             
             conn.commit()
-            print(f"{Fore.GREEN}Updated crypto config for {symbol}: active={is_active}{Style.RESET_ALL}")
+            status_text = "ACTIVE" if is_active else "INACTIVE"
+            print(f"{Fore.GREEN}Updated crypto config for {symbol}: {status_text}{Style.RESET_ALL}")
+            logger.info(f"Updated crypto config: {symbol} -> {status_text}")
             return True
             
         except Exception as e:
             print(f"{Fore.RED}Error updating crypto config for {symbol}: {e}{Style.RESET_ALL}")
+            logger.error(f"Error updating crypto config for {symbol}: {e}")
             return False
         finally:
             conn.close()
@@ -253,14 +204,17 @@ class DatabaseManager:
             
             if cursor.rowcount > 0:
                 conn.commit()
-                print(f"{Fore.GREEN}Activated crypto: {symbol}{Style.RESET_ALL}")
+                print(f"{Fore.GREEN}✅ Activated crypto: {symbol}{Style.RESET_ALL}")
+                logger.info(f"Activated crypto: {symbol}")
                 return True
             else:
-                print(f"{Fore.YELLOW}Crypto {symbol} not found in configs{Style.RESET_ALL}")
+                print(f"{Fore.YELLOW}⚠️ Crypto {symbol} not found in configs{Style.RESET_ALL}")
+                logger.warning(f"Crypto not found for activation: {symbol}")
                 return False
                 
         except Exception as e:
-            print(f"{Fore.RED}Error activating crypto {symbol}: {e}{Style.RESET_ALL}")
+            print(f"{Fore.RED}❌ Error activating crypto {symbol}: {e}{Style.RESET_ALL}")
+            logger.error(f"Error activating crypto {symbol}: {e}")
             return False
         finally:
             conn.close()
@@ -279,14 +233,17 @@ class DatabaseManager:
             
             if cursor.rowcount > 0:
                 conn.commit()
-                print(f"{Fore.YELLOW}Deactivated crypto: {symbol}{Style.RESET_ALL}")
+                print(f"{Fore.YELLOW}🔴 Deactivated crypto: {symbol}{Style.RESET_ALL}")
+                logger.info(f"Deactivated crypto: {symbol}")
                 return True
             else:
-                print(f"{Fore.YELLOW}Crypto {symbol} not found in configs{Style.RESET_ALL}")
+                print(f"{Fore.YELLOW}⚠️ Crypto {symbol} not found in configs{Style.RESET_ALL}")
+                logger.warning(f"Crypto not found for deactivation: {symbol}")
                 return False
                 
         except Exception as e:
-            print(f"{Fore.RED}Error deactivating crypto {symbol}: {e}{Style.RESET_ALL}")
+            print(f"{Fore.RED}❌ Error deactivating crypto {symbol}: {e}{Style.RESET_ALL}")
+            logger.error(f"Error deactivating crypto {symbol}: {e}")
             return False
         finally:
             conn.close()
@@ -294,7 +251,7 @@ class DatabaseManager:
     # ===== BOT COMMAND METHODS =====
     
     def add_bot_command(self, command_type, command_data=None):
-        """Add a new bot command"""
+        """Add a new bot command to the queue"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
@@ -310,11 +267,13 @@ class DatabaseManager:
             
             command_id = cursor.lastrowid
             conn.commit()
-            print(f"{Fore.CYAN}Added bot command: {command_type} (ID: {command_id}){Style.RESET_ALL}")
+            print(f"{Fore.CYAN}📨 Added bot command: {command_type} (ID: {command_id}){Style.RESET_ALL}")
+            logger.info(f"Added bot command: {command_type} (ID: {command_id})")
             return command_id
             
         except Exception as e:
-            print(f"{Fore.RED}Error adding bot command: {e}{Style.RESET_ALL}")
+            print(f"{Fore.RED}❌ Error adding bot command: {e}{Style.RESET_ALL}")
+            logger.error(f"Error adding bot command {command_type}: {e}")
             return None
         finally:
             conn.close()
@@ -324,24 +283,30 @@ class DatabaseManager:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        cursor.execute("""
-            SELECT id, command_type, command_data, created_at
-            FROM bot_commands 
-            WHERE status = 'PENDING'
-            ORDER BY created_at ASC
-        """)
-        
-        commands = []
-        for row in cursor.fetchall():
-            commands.append({
-                'id': row[0],
-                'command_type': row[1],
-                'command_data': json.loads(row[2]) if row[2] else None,
-                'created_at': row[3]
-            })
-        
-        conn.close()
-        return commands
+        try:
+            cursor.execute("""
+                SELECT id, command_type, command_data, created_at
+                FROM bot_commands 
+                WHERE status = 'PENDING'
+                ORDER BY created_at ASC
+            """)
+            
+            commands = []
+            for row in cursor.fetchall():
+                commands.append({
+                    'id': row[0],
+                    'command_type': row[1],
+                    'command_data': json.loads(row[2]) if row[2] else None,
+                    'created_at': row[3]
+                })
+            
+            return commands
+            
+        except Exception as e:
+            logger.error(f"Error getting pending commands: {e}")
+            return []
+        finally:
+            conn.close()
     
     def mark_command_executed(self, command_id, success=True, error_message=None):
         """Mark a bot command as executed"""
@@ -358,11 +323,89 @@ class DatabaseManager:
             """, (status, datetime.now(), error_message, command_id))
             
             conn.commit()
-            print(f"{Fore.GREEN}Command {command_id} marked as {status}{Style.RESET_ALL}")
+            status_icon = "✅" if success else "❌"
+            print(f"{Fore.GREEN}{status_icon} Command {command_id} marked as {status}{Style.RESET_ALL}")
+            logger.info(f"Command {command_id} marked as {status}")
             return True
             
         except Exception as e:
-            print(f"{Fore.RED}Error updating command status: {e}{Style.RESET_ALL}")
+            print(f"{Fore.RED}❌ Error updating command status: {e}{Style.RESET_ALL}")
+            logger.error(f"Error updating command {command_id} status: {e}")
             return False
         finally:
             conn.close()
+    
+    def cleanup_old_commands(self, days_old=7):
+        """Clean up old executed commands"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                DELETE FROM bot_commands 
+                WHERE status IN ('EXECUTED', 'FAILED') 
+                AND executed_at < datetime('now', '-{} days')
+            """.format(days_old))
+            
+            deleted_count = cursor.rowcount
+            conn.commit()
+            
+            if deleted_count > 0:
+                logger.info(f"Cleaned up {deleted_count} old commands")
+            
+            return deleted_count
+            
+        except Exception as e:
+            logger.error(f"Error cleaning up old commands: {e}")
+            return 0
+        finally:
+            conn.close()
+    
+    # ===== UTILITY METHODS =====
+    
+    def get_database_stats(self):
+        """Get database statistics"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            stats = {}
+            
+            # Crypto configs count
+            cursor.execute("SELECT COUNT(*) FROM crypto_configs")
+            stats['total_cryptos'] = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM crypto_configs WHERE is_active = TRUE")
+            stats['active_cryptos'] = cursor.fetchone()[0]
+            
+            # Commands count
+            cursor.execute("SELECT COUNT(*) FROM bot_commands WHERE status = 'PENDING'")
+            stats['pending_commands'] = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM bot_commands WHERE status = 'EXECUTED'")
+            stats['executed_commands'] = cursor.fetchone()[0]
+            
+            return stats
+            
+        except Exception as e:
+            logger.error(f"Error getting database stats: {e}")
+            return {}
+        finally:
+            conn.close()
+
+    # ===== BACKWARD COMPATIBILITY METHODS =====
+    
+    def log_trade(self, trade_data):
+        """Backward compatibility - delegate to ActivityLogger"""
+        # Import here to avoid circular imports
+        from database.activity_logger import ActivityLogger
+        
+        activity_logger = ActivityLogger(self.db_path)
+        return activity_logger.log_trade(trade_data)
+    
+    def update_trade_result(self, trade_id, exit_price, profit_loss, result):
+        """Backward compatibility - delegate to ActivityLogger"""
+        from database.activity_logger import ActivityLogger
+        
+        activity_logger = ActivityLogger(self.db_path)
+        return activity_logger.update_trade_result(trade_id, exit_price, profit_loss, result)

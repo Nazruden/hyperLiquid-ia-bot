@@ -8,6 +8,7 @@ import {
   Settings,
   BarChart3,
   History,
+  BookOpen,
 } from "lucide-react";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { apiService } from "../services/api";
@@ -18,6 +19,7 @@ import TradeHistory from "./TradeHistory";
 import PerformanceChart from "./PerformanceChart";
 import ThemeToggle from "./ThemeToggle";
 import CryptoManager from "./CryptoManager";
+import ActivityJournal from "./ActivityJournal";
 
 const Dashboard: React.FC = () => {
   const [dashboardData, setDashboardData] = useState<DashboardMetrics | null>(
@@ -26,16 +28,15 @@ const Dashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<
-    "overview" | "crypto" | "analytics"
+    "overview" | "crypto" | "analytics" | "activity"
   >("overview");
   const [activeCryptos, setActiveCryptos] = useState<string[]>([]);
 
-  const { isConnected, connectionError, botStatus, liveMetrics } = useWebSocket(
-    {
+  const { isConnected, connectionError, botStatus, liveMetrics, botModeState } =
+    useWebSocket({
       url: "ws://localhost:8000/ws",
       autoConnect: true,
-    }
-  );
+    });
 
   // Load initial dashboard data
   useEffect(() => {
@@ -168,6 +169,17 @@ const Dashboard: React.FC = () => {
             >
               <History className="w-4 h-4 inline mr-2" />
               Analytics
+            </button>
+            <button
+              onClick={() => setActiveTab("activity")}
+              className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                activeTab === "activity"
+                  ? "border-primary-500 text-primary-600"
+                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+              }`}
+            >
+              <BookOpen className="w-4 h-4 inline mr-2" />
+              Activity Journal
             </button>
           </nav>
         </div>
@@ -398,6 +410,18 @@ const Dashboard: React.FC = () => {
                 <TradeHistory />
               </div>
             </div>
+          </div>
+        )}
+
+        {activeTab === "activity" && (
+          <div className="space-y-8">
+            <h2 className="text-2xl font-bold text-primary mb-4">
+              Activity Journal - Live Monitoring
+            </h2>
+            <ActivityJournal
+              isMonitoring={botModeState?.mode === "ACTIVE"}
+              maxItems={200}
+            />
           </div>
         )}
       </main>

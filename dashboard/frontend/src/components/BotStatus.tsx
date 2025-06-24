@@ -9,8 +9,11 @@ import {
   Eye,
   EyeOff,
   Settings,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 import { apiService } from "../services/api";
+import { useWebSocket } from "../hooks/useWebSocket";
 import type {
   BotStatus as BotStatusType,
   BotModeStatus,
@@ -26,11 +29,55 @@ const BotStatus: React.FC<BotStatusProps> = ({ botStatus }) => {
   const [modeStatus, setModeStatus] = useState<BotModeStatus | null>(null);
   const [activeCryptos, setActiveCryptos] = useState<string[]>([]);
 
-  // Load bot mode status on component mount
+  // Enhanced WebSocket integration for real-time state sync
+  const {
+    isConnected,
+    botModeState,
+    botProcessState,
+    activityStream,
+    connectionStats,
+    requestFullStateSync,
+  } = useWebSocket({
+    autoConnect: true,
+    reconnectAttempts: 5,
+    reconnectInterval: 3000,
+  });
+
+  // Sync WebSocket state with local component state
   useEffect(() => {
-    loadModeStatus();
-    loadActiveCryptos();
-  }, []);
+    if (botModeState) {
+      setModeStatus({
+        mode: botModeState.mode,
+        monitoring_enabled: botModeState.monitoring_enabled,
+        active_cryptos: botModeState.active_cryptos as Record<string, number>,
+        status: botModeState.mode, // Use mode as status for compatibility
+      });
+      setActiveCryptos(Object.keys(botModeState.active_cryptos || {}));
+    }
+  }, [botModeState]);
+
+  // Load initial data on component mount (fallback if WebSocket not ready)
+  useEffect(() => {
+    const loadInitialData = async () => {
+      // If WebSocket is connected, request full state sync
+      if (isConnected) {
+        requestFullStateSync();
+      } else {
+        // Fallback to API calls
+        await loadModeStatus();
+        await loadActiveCryptos();
+      }
+    };
+
+    loadInitialData();
+  }, [isConnected, requestFullStateSync]);
+
+  // Clear error when WebSocket reconnects
+  useEffect(() => {
+    if (isConnected && error && error.includes("WebSocket")) {
+      setError(null);
+    }
+  }, [isConnected, error]);
 
   const loadModeStatus = async () => {
     try {
@@ -75,8 +122,9 @@ const BotStatus: React.FC<BotStatusProps> = ({ botStatus }) => {
       if (!response.success) {
         setError(response.error || `Failed to ${action} bot`);
       } else {
-        // Reload mode status after action
-        await loadModeStatus();
+        // WebSocket will automatically sync the new state
+        // No need to manually reload - this is the key improvement!
+        console.log(`✅ Bot ${action} successful - WebSocket will sync state`);
       }
     } catch (err) {
       const errorMessage = apiService.handleApiError(err);
@@ -93,15 +141,20 @@ const BotStatus: React.FC<BotStatusProps> = ({ botStatus }) => {
       setActionLoading(action);
       setError(null);
 
+      // Check active cryptos from WebSocket state first
+      const currentActiveCryptos = botModeState?.active_cryptos || {};
+      const activeCryptoCount = Object.keys(currentActiveCryptos).length;
+
+      if (action === "start-monitoring" && activeCryptoCount === 0) {
+        setError(
+          "Cannot start monitoring: No active cryptocurrencies. Please activate some cryptos first."
+        );
+        setActionLoading(null);
+        return;
+      }
+
       let response;
       if (action === "start-monitoring") {
-        if (activeCryptos.length === 0) {
-          setError(
-            "Cannot start monitoring: No active cryptocurrencies. Please activate some cryptos first."
-          );
-          setActionLoading(null);
-          return;
-        }
         response = await apiService.startMonitoring();
       } else {
         response = await apiService.setStandbyMode();
@@ -110,9 +163,9 @@ const BotStatus: React.FC<BotStatusProps> = ({ botStatus }) => {
       if (!response.success) {
         setError(response.error || `Failed to ${action.replace("-", " ")}`);
       } else {
-        // Update mode status
-        setModeStatus(response.data.status);
-        await loadModeStatus();
+        // WebSocket will automatically sync the new state
+        // This is the core fix for the dashboard sync issue!
+        console.log(`✅ Mode ${action} successful - WebSocket will sync state`);
       }
     } catch (err) {
       const errorMessage = apiService.handleApiError(err);
@@ -122,8 +175,24 @@ const BotStatus: React.FC<BotStatusProps> = ({ botStatus }) => {
     }
   };
 
+  // Enhanced status detection using WebSocket state
+  const getCurrentBotStatus = () => {
+    // Use WebSocket process state if available, otherwise fall back to props
+    if (botProcessState) {
+      return {
+        status: botProcessState.status,
+        pid: botProcessState.pid,
+        uptime: botProcessState.uptime,
+        ...botStatus,
+      };
+    }
+    return botStatus;
+  };
+
+  const currentBotStatus = getCurrentBotStatus();
+
   const getStatusIcon = () => {
-    switch (botStatus?.status) {
+    switch (currentBotStatus?.status) {
       case "running":
         return <CheckCircle className="w-5 h-5 text-success-500" />;
       case "stopped":
@@ -150,7 +219,7 @@ const BotStatus: React.FC<BotStatusProps> = ({ botStatus }) => {
   };
 
   const getStatusColor = () => {
-    switch (botStatus?.status) {
+    switch (currentBotStatus?.status) {
       case "running":
         return "text-success-600 bg-success-50 border-success-200";
       case "stopped":
@@ -182,25 +251,29 @@ const BotStatus: React.FC<BotStatusProps> = ({ botStatus }) => {
     switch (action) {
       case "start":
         return (
-          botStatus?.status === "running" || botStatus?.status === "starting"
+          currentBotStatus?.status === "running" ||
+          currentBotStatus?.status === "starting"
         );
       case "stop":
         return (
-          botStatus?.status === "stopped" || botStatus?.status === "stopping"
+          currentBotStatus?.status === "stopped" ||
+          currentBotStatus?.status === "stopping"
         );
       case "restart":
         return (
-          botStatus?.status === "starting" || botStatus?.status === "stopping"
+          currentBotStatus?.status === "starting" ||
+          currentBotStatus?.status === "stopping"
         );
       case "start-monitoring":
         return (
-          botStatus?.status !== "running" ||
+          currentBotStatus?.status !== "running" ||
           modeStatus?.mode === "ACTIVE" ||
           activeCryptos.length === 0
         );
       case "set-standby":
         return (
-          botStatus?.status !== "running" || modeStatus?.mode === "STANDBY"
+          currentBotStatus?.status !== "running" ||
+          modeStatus?.mode === "STANDBY"
         );
       default:
         return false;
@@ -215,17 +288,31 @@ const BotStatus: React.FC<BotStatusProps> = ({ botStatus }) => {
           <h2 className="text-xl font-semibold text-gray-900 ml-2">
             Bot Control
           </h2>
+          {/* WebSocket Connection Indicator */}
+          <div className="ml-auto flex items-center">
+            {isConnected ? (
+              <div className="flex items-center text-green-600">
+                <Wifi className="w-4 h-4 mr-1" />
+                <span className="text-xs">Live</span>
+              </div>
+            ) : (
+              <div className="flex items-center text-red-600">
+                <WifiOff className="w-4 h-4 mr-1" />
+                <span className="text-xs">Offline</span>
+              </div>
+            )}
+          </div>
         </div>
         <div className="flex space-x-2">
           {/* Primary Status: Mode (STANDBY/ACTIVE) or Process Status if stopped */}
           <div
             className={`px-3 py-1 rounded-full text-sm font-medium border flex items-center ${
-              modeStatus && botStatus?.status === "running"
+              modeStatus && currentBotStatus?.status === "running"
                 ? getModeColor()
                 : getStatusColor()
             }`}
           >
-            {modeStatus && botStatus?.status === "running" ? (
+            {modeStatus && currentBotStatus?.status === "running" ? (
               <>
                 {getModeIcon()}
                 <span className="ml-1">{modeStatus.mode}</span>
@@ -234,18 +321,18 @@ const BotStatus: React.FC<BotStatusProps> = ({ botStatus }) => {
               <>
                 {getStatusIcon()}
                 <span className="ml-1">
-                  {botStatus?.status?.toUpperCase() || "UNKNOWN"}
+                  {currentBotStatus?.status?.toUpperCase() || "UNKNOWN"}
                 </span>
               </>
             )}
           </div>
 
           {/* Secondary Status: Process info when mode is shown */}
-          {modeStatus && botStatus?.status === "running" && (
+          {modeStatus && currentBotStatus?.status === "running" && (
             <div
               className={`px-2 py-1 rounded text-xs font-medium border ${getStatusColor()}`}
             >
-              PID: {botStatus?.pid || "N/A"}
+              PID: {currentBotStatus?.pid || "N/A"}
             </div>
           )}
         </div>
@@ -256,6 +343,19 @@ const BotStatus: React.FC<BotStatusProps> = ({ botStatus }) => {
           <div className="flex items-center">
             <AlertTriangle className="w-4 h-4 text-danger-500 mr-2" />
             <span className="text-sm text-danger-700">{error}</span>
+          </div>
+        </div>
+      )}
+
+      {/* WebSocket Connection Warning */}
+      {!isConnected && (
+        <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+          <div className="flex items-center">
+            <WifiOff className="w-4 h-4 text-yellow-500 mr-2" />
+            <span className="text-sm text-yellow-700">
+              Real-time connection lost. Status may not be current.
+              Reconnecting...
+            </span>
           </div>
         </div>
       )}
@@ -365,29 +465,29 @@ const BotStatus: React.FC<BotStatusProps> = ({ botStatus }) => {
             <div>
               <p className="text-xs text-gray-500">Uptime</p>
               <p className="text-sm font-medium text-gray-900">
-                {botStatus?.uptime
-                  ? `${Math.floor(botStatus.uptime / 3600)}h ${Math.floor(
-                      (botStatus.uptime % 3600) / 60
-                    )}m`
+                {currentBotStatus?.uptime
+                  ? `${Math.floor(
+                      currentBotStatus.uptime / 3600
+                    )}h ${Math.floor((currentBotStatus.uptime % 3600) / 60)}m`
                   : "N/A"}
               </p>
             </div>
             <div>
               <p className="text-xs text-gray-500">Total Trades</p>
               <p className="text-sm font-medium text-gray-900">
-                {botStatus?.total_trades || 0}
+                {currentBotStatus?.total_trades || 0}
               </p>
             </div>
             <div>
               <p className="text-xs text-gray-500">Active Positions</p>
               <p className="text-sm font-medium text-gray-900">
-                {botStatus?.active_positions || 0}
+                {currentBotStatus?.active_positions || 0}
               </p>
             </div>
             <div>
               <p className="text-xs text-gray-500">Balance</p>
               <p className="text-sm font-medium text-gray-900">
-                ${(botStatus?.balance || 0).toFixed(2)}
+                ${(currentBotStatus?.balance || 0).toFixed(2)}
               </p>
             </div>
           </div>
@@ -415,11 +515,30 @@ const BotStatus: React.FC<BotStatusProps> = ({ botStatus }) => {
               </div>
             </div>
           )}
+
+          {/* WebSocket Connection Stats */}
+          {isConnected && connectionStats && (
+            <div className="mt-4 pt-4 border-t border-gray-200">
+              <p className="text-xs text-gray-500 mb-2">Connection Stats</p>
+              <div className="text-xs text-gray-600">
+                <div>Messages: {connectionStats.totalMessages}</div>
+                <div>Activity Stream: {activityStream.length} items</div>
+                {connectionStats.lastHeartbeat && (
+                  <div>
+                    Last Heartbeat:{" "}
+                    {new Date(
+                      connectionStats.lastHeartbeat
+                    ).toLocaleTimeString()}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
       {/* System Resources */}
-      {botStatus?.system_resources && (
+      {currentBotStatus?.system_resources && (
         <div className="mt-6 pt-6 border-t border-gray-200">
           <h3 className="text-sm font-medium text-gray-700 mb-3">
             System Resources
@@ -432,12 +551,12 @@ const BotStatus: React.FC<BotStatusProps> = ({ botStatus }) => {
                   <div
                     className="bg-primary-600 h-2 rounded-full"
                     style={{
-                      width: `${botStatus.system_resources.cpu_percent}%`,
+                      width: `${currentBotStatus.system_resources.cpu_percent}%`,
                     }}
                   />
                 </div>
                 <span className="text-xs text-gray-600">
-                  {botStatus.system_resources.cpu_percent.toFixed(1)}%
+                  {currentBotStatus.system_resources.cpu_percent.toFixed(1)}%
                 </span>
               </div>
             </div>
@@ -448,12 +567,12 @@ const BotStatus: React.FC<BotStatusProps> = ({ botStatus }) => {
                   <div
                     className="bg-primary-600 h-2 rounded-full"
                     style={{
-                      width: `${botStatus.system_resources.memory_percent}%`,
+                      width: `${currentBotStatus.system_resources.memory_percent}%`,
                     }}
                   />
                 </div>
                 <span className="text-xs text-gray-600">
-                  {botStatus.system_resources.memory_percent.toFixed(1)}%
+                  {currentBotStatus.system_resources.memory_percent.toFixed(1)}%
                 </span>
               </div>
             </div>
@@ -464,12 +583,12 @@ const BotStatus: React.FC<BotStatusProps> = ({ botStatus }) => {
                   <div
                     className="bg-primary-600 h-2 rounded-full"
                     style={{
-                      width: `${botStatus.system_resources.disk_usage}%`,
+                      width: `${currentBotStatus.system_resources.disk_usage}%`,
                     }}
                   />
                 </div>
                 <span className="text-xs text-gray-600">
-                  {botStatus.system_resources.disk_usage.toFixed(1)}%
+                  {currentBotStatus.system_resources.disk_usage.toFixed(1)}%
                 </span>
               </div>
             </div>
