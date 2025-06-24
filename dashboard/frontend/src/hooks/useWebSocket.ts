@@ -62,6 +62,7 @@ interface UseWebSocketReturn {
   // State sync methods
   requestFullStateSync: () => void;
   clearActivityStream: () => void;
+  clearCachedState: () => void;
 
   // Connection stats
   connectionStats: {
@@ -90,9 +91,25 @@ export const useWebSocket = (
   const [liveMetrics, setLiveMetrics] = useState<LiveMetrics | null>(null);
 
   // Enhanced state sync support
-  const [botModeState, setBotModeState] = useState<BotModeState | null>(null);
+  const [botModeState, setBotModeState] = useState<BotModeState | null>(() => {
+    // Try to restore from localStorage on initial load
+    try {
+      const stored = localStorage.getItem("bot-mode-state");
+      return stored ? JSON.parse(stored) : null;
+    } catch {
+      return null;
+    }
+  });
   const [botProcessState, setBotProcessState] =
-    useState<BotProcessState | null>(null);
+    useState<BotProcessState | null>(() => {
+      // Try to restore from localStorage on initial load
+      try {
+        const stored = localStorage.getItem("bot-process-state");
+        return stored ? JSON.parse(stored) : null;
+      } catch {
+        return null;
+      }
+    });
   const [activityStream, setActivityStream] = useState<ActivityItem[]>([]);
   const [connectionStats, setConnectionStats] = useState({
     totalMessages: 0,
@@ -420,6 +437,9 @@ export const useWebSocket = (
     setIsConnected(false);
     setConnectionError(null);
     reconnectCountRef.current = 0;
+
+    // Clear cached state (useful for debugging sync issues)
+    clearCachedState();
   }, []);
 
   const sendMessage = useCallback((message: Record<string, unknown>) => {
@@ -440,6 +460,19 @@ export const useWebSocket = (
     setActivityStream([]);
   }, []);
 
+  // Clear cached state (useful for debugging sync issues)
+  const clearCachedState = useCallback(() => {
+    try {
+      localStorage.removeItem("bot-mode-state");
+      localStorage.removeItem("bot-process-state");
+      setBotModeState(null);
+      setBotProcessState(null);
+      console.log("🗑️ Cleared cached state");
+    } catch (error) {
+      console.warn("Failed to clear cached state:", error);
+    }
+  }, []);
+
   // Auto-connect on mount with initial delay
   useEffect(() => {
     if (autoConnect) {
@@ -454,6 +487,30 @@ export const useWebSocket = (
       disconnect();
     };
   }, [autoConnect, connect, disconnect, initialDelay]);
+
+  // Persist critical state to localStorage
+  useEffect(() => {
+    if (botModeState) {
+      try {
+        localStorage.setItem("bot-mode-state", JSON.stringify(botModeState));
+      } catch (error) {
+        console.warn("Failed to persist bot mode state:", error);
+      }
+    }
+  }, [botModeState]);
+
+  useEffect(() => {
+    if (botProcessState) {
+      try {
+        localStorage.setItem(
+          "bot-process-state",
+          JSON.stringify(botProcessState)
+        );
+      } catch (error) {
+        console.warn("Failed to persist bot process state:", error);
+      }
+    }
+  }, [botProcessState]);
 
   // Ping to keep connection alive
   useEffect(() => {
@@ -488,6 +545,7 @@ export const useWebSocket = (
     // State sync methods
     requestFullStateSync,
     clearActivityStream,
+    clearCachedState,
 
     // Connection stats
     connectionStats,

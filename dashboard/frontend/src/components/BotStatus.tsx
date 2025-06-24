@@ -59,18 +59,27 @@ const BotStatus: React.FC<BotStatusProps> = ({ botStatus }) => {
   // Load initial data on component mount (fallback if WebSocket not ready)
   useEffect(() => {
     const loadInitialData = async () => {
-      // If WebSocket is connected, request full state sync
-      if (isConnected) {
-        requestFullStateSync();
-      } else {
-        // Fallback to API calls
-        await loadModeStatus();
-        await loadActiveCryptos();
+      // If WebSocket is connected AND we already have state, no need to reload
+      if (isConnected && botModeState && botProcessState) {
+        console.log("✅ WebSocket state already available, skipping reload");
+        return;
       }
+
+      // If WebSocket is connected but missing state, request sync
+      if (isConnected) {
+        console.log("🔄 Requesting state sync from WebSocket");
+        requestFullStateSync();
+        return;
+      }
+
+      // Only fallback to API calls if WebSocket is not connected
+      console.log("📡 WebSocket not connected, using API fallback");
+      await loadModeStatus();
+      await loadActiveCryptos();
     };
 
     loadInitialData();
-  }, [isConnected, requestFullStateSync]);
+  }, [isConnected, requestFullStateSync, botModeState, botProcessState]);
 
   // Clear error when WebSocket reconnects
   useEffect(() => {

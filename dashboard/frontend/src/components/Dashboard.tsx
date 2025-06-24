@@ -184,14 +184,14 @@ const Dashboard: React.FC = () => {
           </nav>
         </div>
 
+        {/* Persistent Bot Status - Always rendered to maintain state */}
+        <div className={`mb-8 ${activeTab !== "overview" ? "hidden" : ""}`}>
+          <BotStatus key="bot-status-persistent" botStatus={botStatus} />
+        </div>
+
         {/* Tab Content */}
         {activeTab === "overview" && (
           <>
-            {/* Bot Status Section */}
-            <div className="mb-8">
-              <BotStatus botStatus={botStatus} />
-            </div>
-
             {/* Live Metrics Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
               <LiveMetrics
