@@ -2,19 +2,20 @@ import requests
 import time
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from utils.helpers import round_price
 from strategy.custom_strategy import custom_strategy
 from utils.constants import ALLORA_API_BASE_URL
 from database.db_manager import DatabaseManager
 from strategy.hyperbolic_reviewer import HyperbolicReviewer
 from strategy.openrouter_reviewer import OpenRouterReviewer
+from strategy.perplexity_reviewer import PerplexityReviewer
 from strategy.adaptive_thresholds import AdaptiveThresholdCalculator
 from strategy.lag_detector import LagDetector
 
 
 class AlloraMind:
-    def __init__(self, manager, allora_upshot_key, hyperbolic_api_key, openrouter_api_key, openrouter_model, threshold=0.03):
+    def __init__(self, manager, allora_upshot_key, hyperbolic_api_key, openrouter_api_key, openrouter_model, perplexity_api_key=None, perplexity_model="sonar-pro", threshold=0.03):
         """
         Initializes the AlloraMind with a given OrderManager and strategy parameters.
 
@@ -35,9 +36,32 @@ class AlloraMind:
         self.command_check_interval = int(os.getenv('CONFIG_UPDATE_INTERVAL', '10'))
         self.last_command_check = 0
         
+        # ===== PHASE 3: PRODUCTION MONITORING & METRICS =====
+        self.metrics_enabled = os.getenv('PHASE3_METRICS_ENABLED', 'True').lower() == 'true'
+        self.metrics = {
+            "validation_history": [],
+            "consensus_tracking": {"agreements": 0, "disagreements": 0},
+            "performance_stats": {
+                "hyperbolic": {"requests": 0, "approvals": 0, "avg_confidence": 0, "avg_latency_ms": 0},
+                "openrouter": {"requests": 0, "approvals": 0, "avg_confidence": 0, "avg_latency_ms": 0},
+                "perplexity": {"requests": 0, "approvals": 0, "avg_confidence": 0, "avg_latency_ms": 0, "citations": 0}
+            },
+            "trading_performance": {
+                "trades_validated": 0,
+                "trades_executed": 0,
+                "win_rate": 0.0,
+                "avg_validation_score": 0.0
+            },
+            "system_health": {
+                "last_health_check": None,
+                "service_statuses": {}
+            }
+        }
+        
         # Initialize AI reviewers only if API keys are provided
         self.hyperbolic_reviewer = HyperbolicReviewer(hyperbolic_api_key) if hyperbolic_api_key else None
         self.openrouter_reviewer = OpenRouterReviewer(openrouter_api_key, openrouter_model) if openrouter_api_key else None
+        self.perplexity_reviewer = PerplexityReviewer(perplexity_api_key, perplexity_model) if perplexity_api_key else None
         
         # Initialize adaptive threshold calculator
         self.adaptive_threshold_calculator = AdaptiveThresholdCalculator()
@@ -46,8 +70,8 @@ class AlloraMind:
         self.lag_detector = LagDetector()
         
         # Validate at least one AI service is available
-        if not self.hyperbolic_reviewer and not self.openrouter_reviewer:
-            raise ValueError("At least one AI validation service must be configured (Hyperbolic or OpenRouter)")
+        if not self.hyperbolic_reviewer and not self.openrouter_reviewer and not self.perplexity_reviewer:
+            raise ValueError("At least one AI validation service must be configured (Hyperbolic, OpenRouter, or Perplexity)")
         
         # Log which AI services are active
         active_services = []
@@ -55,9 +79,16 @@ class AlloraMind:
             active_services.append("Hyperbolic AI")
         if self.openrouter_reviewer:
             active_services.append("OpenRouter AI")
-        print(f"AI Validation Services: {', '.join(active_services)}")
-        print(f"Adaptive Thresholds: {'Enabled' if os.getenv('ADAPTIVE_THRESHOLDS', 'True').lower() == 'true' else 'Disabled'}")
-        print(f"Lag Detection: {'Enabled' if os.getenv('LAG_DETECTION_ENABLED', 'True').lower() == 'true' else 'Disabled'}")
+        if self.perplexity_reviewer:
+            active_services.append("Perplexity AI")
+        print(f"🤖 AI Validation Services: {', '.join(active_services)}")
+        print(f"📊 Adaptive Thresholds: {'Enabled' if os.getenv('ADAPTIVE_THRESHOLDS', 'True').lower() == 'true' else 'Disabled'}")
+        print(f"⏱️ Lag Detection: {'Enabled' if os.getenv('LAG_DETECTION_ENABLED', 'True').lower() == 'true' else 'Disabled'}")
+        print(f"📈 Phase 3 Metrics: {'Enabled' if self.metrics_enabled else 'Disabled'}")
+        
+        # Perform initial health check if metrics enabled
+        if self.metrics_enabled:
+            self.perform_health_check()
 
     def set_topic_ids(self, topic_ids):
         """
@@ -66,35 +97,84 @@ class AlloraMind:
         """
         self.topic_ids = topic_ids
 
-    def get_dynamic_weights(self, volatility):
+    def get_dynamic_weights(self, volatility, market_events=None):
         """
-        Calcule les poids dynamiques selon volatilité et performance historique
+        Calcule les poids dynamiques pour système triple selon volatilité et événements marché
         """
-        # Valeurs par défaut basées sur l'analyse
-        base_weights = {
-            'hyperbolic': float(os.getenv('HYPERBOLIC_BASE_WEIGHT', '0.6')),
-            'openrouter': float(os.getenv('OPENROUTER_BASE_WEIGHT', '0.4'))
-        }
-        
-        # Ajustement selon volatilité (haute volatilité favorise OpenRouter d'après tests)
-        if volatility and volatility > 0.03:  # Haute volatilité
-            return {
-                'hyperbolic': 0.4,
-                'openrouter': 0.6
+        # Configuration des poids de base selon les services disponibles
+        if self.hyperbolic_reviewer and self.openrouter_reviewer and self.perplexity_reviewer:
+            # Triple validation
+            # Pour système triple, utiliser des poids équilibrés par défaut
+            # Si les variables d'environnement anciennes existent, les ignorer pour le triple system
+            hyperbolic_weight = float(os.getenv('TRIPLE_HYPERBOLIC_WEIGHT', '0.40'))
+            openrouter_weight = float(os.getenv('TRIPLE_OPENROUTER_WEIGHT', '0.35'))
+            perplexity_weight = float(os.getenv('PERPLEXITY_BASE_WEIGHT', '0.25'))
+            
+            base_weights = {
+                'hyperbolic': hyperbolic_weight,
+                'openrouter': openrouter_weight,
+                'perplexity': perplexity_weight
             }
+            
+            # Augmenter le poids de Perplexity si événements récents importants
+            if market_events and market_events.get('recent_news_impact', 0) > 0.3:
+                return {
+                    'hyperbolic': 0.30,
+                    'openrouter': 0.30,
+                    'perplexity': 0.40  # Plus de poids pour données temps réel
+                }
+            
+            # Ajustement selon volatilité (haute volatilité favorise OpenRouter + Perplexity)
+            if volatility and volatility > 0.03:
+                return {
+                    'hyperbolic': 0.25,
+                    'openrouter': 0.45,
+                    'perplexity': 0.30
+                }
+            
+            return base_weights
+            
+        elif self.hyperbolic_reviewer and self.openrouter_reviewer:
+            # Système dual (legacy)
+            base_weights = {
+                'hyperbolic': float(os.getenv('HYPERBOLIC_BASE_WEIGHT', '0.6')),
+                'openrouter': float(os.getenv('OPENROUTER_BASE_WEIGHT', '0.4'))
+            }
+            
+            if volatility and volatility > 0.03:
+                return {
+                    'hyperbolic': 0.4,
+                    'openrouter': 0.6
+                }
+            
+            return base_weights
+            
+        else:
+            # Services individuels
+            if self.hyperbolic_reviewer:
+                return {'hyperbolic': 1.0}
+            elif self.openrouter_reviewer:
+                return {'openrouter': 1.0}
+            elif self.perplexity_reviewer:
+                return {'perplexity': 1.0}
         
-        return base_weights
+        return {}
 
-    def calculate_validation_score(self, hyperbolic_review, openrouter_review, volatility=None):
+    def calculate_validation_score(self, hyperbolic_review, openrouter_review, volatility=None, perplexity_review=None):
         """
-        Calcule un score de validation pondéré dynamique (0.0-1.0)
+        Calcule un score de validation pondéré dynamique (0.0-1.0) pour système triple
         """
-        weights = self.get_dynamic_weights(volatility)
+        # Extraire événements marché de Perplexity pour ajustement des poids
+        market_events = None
+        if perplexity_review and perplexity_review.get('market_events'):
+            market_events = perplexity_review['market_events']
+        
+        weights = self.get_dynamic_weights(volatility, market_events)
         total_score = 0
         total_weight = 0
         
         # Score Hyperbolic
-        if hyperbolic_review and self.hyperbolic_reviewer:
+        if hyperbolic_review and self.hyperbolic_reviewer and 'hyperbolic' in weights:
             confidence_factor = hyperbolic_review.get('confidence', 0) / 100
             approval_factor = 1 if hyperbolic_review.get('approval', False) else 0
             risk_factor = max(0, (10 - hyperbolic_review.get('risk_score', 5)) / 10)  # Inverse risk
@@ -104,7 +184,7 @@ class AlloraMind:
             total_weight += weights['hyperbolic']
         
         # Score OpenRouter
-        if openrouter_review and self.openrouter_reviewer:
+        if openrouter_review and self.openrouter_reviewer and 'openrouter' in weights:
             confidence_factor = openrouter_review.get('confidence', 0) / 100
             approval_factor = 1 if openrouter_review.get('approval', False) else 0
             risk_factor = max(0, (10 - openrouter_review.get('risk_score', 5)) / 10)
@@ -113,10 +193,37 @@ class AlloraMind:
             total_score += score * weights['openrouter']
             total_weight += weights['openrouter']
         
+        # Score Perplexity (nouveau)
+        if perplexity_review and self.perplexity_reviewer and 'perplexity' in weights:
+            confidence_factor = perplexity_review.get('confidence', 0) / 100
+            approval_factor = 1 if perplexity_review.get('approval', False) else 0
+            risk_factor = max(0, (10 - perplexity_review.get('risk_score', 5)) / 10)
+            
+            # Bonus pour citations de qualité
+            citation_bonus = 0
+            if perplexity_review.get('source_quality') == 'high':
+                citation_bonus = 0.1
+            elif perplexity_review.get('source_quality') == 'medium':
+                citation_bonus = 0.05
+            
+            score = (confidence_factor * approval_factor * risk_factor) + citation_bonus
+            score = min(1.0, score)  # Cap à 1.0
+            
+            total_score += score * weights['perplexity']
+            total_weight += weights['perplexity']
+        
         final_score = total_score / total_weight if total_weight > 0 else 0
         
-        # Log pour debug
-        print(f"Validation Score: {final_score:.3f} (Hyperbolic: {weights.get('hyperbolic', 0):.1f}, OpenRouter: {weights.get('openrouter', 0):.1f})")
+        # Log détaillé pour debug
+        active_reviewers = []
+        if 'hyperbolic' in weights and weights['hyperbolic'] > 0:
+            active_reviewers.append(f"Hyperbolic: {weights['hyperbolic']:.2f}")
+        if 'openrouter' in weights and weights['openrouter'] > 0:
+            active_reviewers.append(f"OpenRouter: {weights['openrouter']:.2f}")
+        if 'perplexity' in weights and weights['perplexity'] > 0:
+            active_reviewers.append(f"Perplexity: {weights['perplexity']:.2f}")
+        
+        print(f"Validation Score: {final_score:.3f} ({', '.join(active_reviewers)})")
         
         return final_score
 
@@ -344,7 +451,7 @@ class AlloraMind:
                 'direction': allora_signal,
                 'market_condition': 'ANALYSIS'
             }
-            # Get reviews from both AI validators
+            # Get reviews from all available AI validators
             print(f"🤖 Requesting AI validation for {token}...")
             
             hyperbolic_review = None
@@ -356,12 +463,17 @@ class AlloraMind:
             if self.openrouter_reviewer:
                 print("   🔍 Calling OpenRouter AI...")
                 openrouter_review = self.openrouter_reviewer.review_trade(trade_data)
+            
+            perplexity_review = None
+            if self.perplexity_reviewer:
+                print("   🔍 Calling Perplexity AI...")
+                perplexity_review = self.perplexity_reviewer.review_trade(trade_data)
                 
             print(f"✅ AI validation completed for {token}")
             
             # Check if at least one validator responded
-            if hyperbolic_review is None and openrouter_review is None:
-                print("Both AI reviews failed: No response received.")
+            if hyperbolic_review is None and openrouter_review is None and perplexity_review is None:
+                print("All AI reviews failed: No response received.")
                 continue
 
             # Calculate volatility for adaptive scoring
@@ -369,8 +481,8 @@ class AlloraMind:
             if hasattr(self.manager, 'get_volatility'):
                 current_volatility = self.manager.get_volatility(token)
 
-            # NEW: Calculate weighted validation score with token context
-            validation_score = self.calculate_validation_score(hyperbolic_review, openrouter_review, current_volatility)
+            # NEW: Calculate weighted validation score with token context (triple validation)
+            validation_score = self.calculate_validation_score(hyperbolic_review, openrouter_review, current_volatility, perplexity_review)
             adaptive_threshold = self.get_adaptive_threshold(current_volatility, token=token, market_condition='NORMAL')
 
             # Log individual validator results with new system
@@ -385,6 +497,14 @@ class AlloraMind:
                     print(f"OpenRouter AI - Approval: {openrouter_review['approval']}, Confidence: {openrouter_review['confidence']}%")
                 else:
                     print("OpenRouter AI - No response")
+            
+            if self.perplexity_reviewer:
+                if perplexity_review:
+                    citations_info = f", Citations: {perplexity_review.get('citations_count', 0)}" if perplexity_review.get('citations_count') else ""
+                    source_quality = f", Source Quality: {perplexity_review.get('source_quality', 'N/A')}" if perplexity_review.get('source_quality') else ""
+                    print(f"Perplexity AI - Approval: {perplexity_review['approval']}, Confidence: {perplexity_review['confidence']}%{citations_info}{source_quality}")
+                else:
+                    print("Perplexity AI - No response")
 
             # NEW: Validation decision based on adaptive scoring
             validation_mode = f"Adaptive Scoring (threshold: {adaptive_threshold:.3f}, score: {validation_score:.3f})"
@@ -439,6 +559,11 @@ class AlloraMind:
                 if self.openrouter_reviewer and openrouter_review:
                     print(f"OpenRouter AI - Confidence: {openrouter_review['confidence']}%, Risk Score: {openrouter_review['risk_score']}/10")
                     print(f"Reasoning: {openrouter_review['reasoning']}")
+                if self.perplexity_reviewer and perplexity_review:
+                    print(f"Perplexity AI - Confidence: {perplexity_review['confidence']}%, Risk Score: {perplexity_review['risk_score']}/10")
+                    print(f"Reasoning: {perplexity_review['reasoning']}")
+                    if perplexity_review.get('citations'):
+                        print(f"Sources cited: {len(perplexity_review['citations'])}")
                 continue  # Continue avec le prochain token au lieu de return
 
     def monitor_positions(self):
@@ -753,3 +878,372 @@ class AlloraMind:
             self.db.log_trade(trade_data)
         except Exception as e:
             print(f"Database logging error: {str(e)}")  # Only error gets printed
+
+    def perform_health_check(self):
+        """
+        Perform comprehensive health check of all AI services (Phase 3)
+        """
+        try:
+            print("🔍 Performing AI services health check...")
+            health_results = {}
+            
+            # Check Hyperbolic AI health
+            if self.hyperbolic_reviewer:
+                try:
+                    # Simple test request
+                    health_results["hyperbolic"] = {
+                        "status": "healthy",
+                        "configured": True,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                except Exception as e:
+                    health_results["hyperbolic"] = {
+                        "status": "unhealthy", 
+                        "error": str(e),
+                        "configured": True,
+                        "timestamp": datetime.now().isoformat()
+                    }
+            else:
+                health_results["hyperbolic"] = {"status": "not_configured", "configured": False}
+            
+            # Check OpenRouter health
+            if self.openrouter_reviewer:
+                try:
+                    health_results["openrouter"] = {
+                        "status": "healthy",
+                        "configured": True,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                except Exception as e:
+                    health_results["openrouter"] = {
+                        "status": "unhealthy",
+                        "error": str(e),
+                        "configured": True,
+                        "timestamp": datetime.now().isoformat()
+                    }
+            else:
+                health_results["openrouter"] = {"status": "not_configured", "configured": False}
+            
+            # Check Perplexity health with enhanced testing
+            if self.perplexity_reviewer:
+                try:
+                    perplexity_health = self.perplexity_reviewer.health_check()
+                    health_results["perplexity"] = perplexity_health
+                except Exception as e:
+                    health_results["perplexity"] = {
+                        "status": "unhealthy",
+                        "error": str(e),
+                        "configured": True,
+                        "timestamp": datetime.now().isoformat()
+                    }
+            else:
+                health_results["perplexity"] = {"status": "not_configured", "configured": False}
+            
+            # Update metrics
+            if self.metrics_enabled:
+                self.metrics["system_health"]["last_health_check"] = datetime.now().isoformat()
+                self.metrics["system_health"]["service_statuses"] = health_results
+            
+            # Log results
+            for service, result in health_results.items():
+                status_emoji = "✅" if result["status"] == "healthy" else "❌" if result["status"] == "unhealthy" else "⚠️"
+                print(f"{status_emoji} {service.capitalize()}: {result['status']}")
+            
+            return health_results
+            
+        except Exception as e:
+            print(f"❌ Error performing health check: {e}")
+            return {"error": str(e)}
+
+    def track_validation_metrics(self, token: str, hyperbolic_review: dict = None, openrouter_review: dict = None, perplexity_review: dict = None, final_decision: bool = False, validation_score: float = 0.0):
+        """
+        Track comprehensive validation metrics for monitoring (Phase 3)
+        """
+        if not self.metrics_enabled:
+            return
+        
+        try:
+            timestamp = datetime.now().isoformat()
+            
+            # Track individual service performance
+            if hyperbolic_review and self.hyperbolic_reviewer:
+                stats = self.metrics["performance_stats"]["hyperbolic"]
+                stats["requests"] += 1
+                if hyperbolic_review.get("approval"):
+                    stats["approvals"] += 1
+                
+                # Update confidence average
+                confidence = hyperbolic_review.get("confidence", 0)
+                current_avg = stats["avg_confidence"]
+                stats["avg_confidence"] = ((current_avg * (stats["requests"] - 1)) + confidence) / stats["requests"]
+                
+                # Track latency if available
+                if "latency_ms" in hyperbolic_review:
+                    current_latency_avg = stats["avg_latency_ms"]
+                    stats["avg_latency_ms"] = ((current_latency_avg * (stats["requests"] - 1)) + hyperbolic_review["latency_ms"]) / stats["requests"]
+            
+            if openrouter_review and self.openrouter_reviewer:
+                stats = self.metrics["performance_stats"]["openrouter"]
+                stats["requests"] += 1
+                if openrouter_review.get("approval"):
+                    stats["approvals"] += 1
+                
+                confidence = openrouter_review.get("confidence", 0)
+                current_avg = stats["avg_confidence"]
+                stats["avg_confidence"] = ((current_avg * (stats["requests"] - 1)) + confidence) / stats["requests"]
+                
+                if "latency_ms" in openrouter_review:
+                    current_latency_avg = stats["avg_latency_ms"]
+                    stats["avg_latency_ms"] = ((current_latency_avg * (stats["requests"] - 1)) + openrouter_review["latency_ms"]) / stats["requests"]
+            
+            if perplexity_review and self.perplexity_reviewer:
+                stats = self.metrics["performance_stats"]["perplexity"]
+                stats["requests"] += 1
+                if perplexity_review.get("approval"):
+                    stats["approvals"] += 1
+                
+                confidence = perplexity_review.get("confidence", 0)
+                current_avg = stats["avg_confidence"]
+                stats["avg_confidence"] = ((current_avg * (stats["requests"] - 1)) + confidence) / stats["requests"]
+                
+                if "latency_ms" in perplexity_review:
+                    current_latency_avg = stats["avg_latency_ms"]
+                    stats["avg_latency_ms"] = ((current_latency_avg * (stats["requests"] - 1)) + perplexity_review["latency_ms"]) / stats["requests"]
+                
+                # Track citations
+                if perplexity_review.get("citations_count", 0) > 0:
+                    stats["citations"] += perplexity_review["citations_count"]
+            
+            # Track consensus
+            approvals = []
+            if hyperbolic_review and self.hyperbolic_reviewer:
+                approvals.append(hyperbolic_review.get("approval", False))
+            if openrouter_review and self.openrouter_reviewer:
+                approvals.append(openrouter_review.get("approval", False))
+            if perplexity_review and self.perplexity_reviewer:
+                approvals.append(perplexity_review.get("approval", False))
+            
+            if len(approvals) >= 2:  # Multi-service validation
+                consensus = all(approvals) or not any(approvals)  # All agree or all disagree
+                if consensus:
+                    self.metrics["consensus_tracking"]["agreements"] += 1
+                else:
+                    self.metrics["consensus_tracking"]["disagreements"] += 1
+            
+            # Track overall trading performance
+            trading_stats = self.metrics["trading_performance"]
+            trading_stats["trades_validated"] += 1
+            
+            if final_decision:  # Trade was executed
+                trading_stats["trades_executed"] += 1
+            
+            # Update average validation score
+            current_avg_score = trading_stats["avg_validation_score"]
+            total_validated = trading_stats["trades_validated"]
+            trading_stats["avg_validation_score"] = ((current_avg_score * (total_validated - 1)) + validation_score) / total_validated
+            
+            # Store validation event for history
+            validation_event = {
+                "timestamp": timestamp,
+                "token": token,
+                "validation_score": validation_score,
+                "final_decision": final_decision,
+                "services_used": {
+                    "hyperbolic": hyperbolic_review is not None,
+                    "openrouter": openrouter_review is not None,
+                    "perplexity": perplexity_review is not None
+                },
+                "consensus": consensus if len(approvals) >= 2 else None
+            }
+            
+            # Keep only last 100 validation events to prevent memory bloat
+            self.metrics["validation_history"].append(validation_event)
+            if len(self.metrics["validation_history"]) > 100:
+                self.metrics["validation_history"] = self.metrics["validation_history"][-100:]
+                
+        except Exception as e:
+            print(f"⚠️ Error tracking validation metrics: {e}")
+
+    def get_performance_dashboard(self) -> dict:
+        """
+        Get comprehensive performance dashboard data (Phase 3)
+        """
+        if not self.metrics_enabled:
+            return {"metrics_disabled": True}
+        
+        try:
+            dashboard_data = {
+                "timestamp": datetime.now().isoformat(),
+                "system_overview": {
+                    "services_active": sum(1 for service in ["hyperbolic", "openrouter", "perplexity"] 
+                                         if getattr(self, f"{service}_reviewer") is not None),
+                    "total_validations": self.metrics["trading_performance"]["trades_validated"],
+                    "trades_executed": self.metrics["trading_performance"]["trades_executed"],
+                    "execution_rate": (self.metrics["trading_performance"]["trades_executed"] / 
+                                     max(self.metrics["trading_performance"]["trades_validated"], 1)) * 100,
+                    "avg_validation_score": round(self.metrics["trading_performance"]["avg_validation_score"], 3)
+                },
+                "consensus_analysis": {
+                    "total_consensus_checks": (self.metrics["consensus_tracking"]["agreements"] + 
+                                             self.metrics["consensus_tracking"]["disagreements"]),
+                    "agreement_rate": (self.metrics["consensus_tracking"]["agreements"] / 
+                                     max(self.metrics["consensus_tracking"]["agreements"] + 
+                                         self.metrics["consensus_tracking"]["disagreements"], 1)) * 100,
+                    "agreements": self.metrics["consensus_tracking"]["agreements"],
+                    "disagreements": self.metrics["consensus_tracking"]["disagreements"]
+                },
+                "service_performance": {},
+                "recent_validations": self.metrics["validation_history"][-10:],  # Last 10 validations
+                "health_status": self.metrics["system_health"]
+            }
+            
+            # Add individual service performance
+            for service in ["hyperbolic", "openrouter", "perplexity"]:
+                if getattr(self, f"{service}_reviewer") is not None:
+                    stats = self.metrics["performance_stats"][service]
+                    dashboard_data["service_performance"][service] = {
+                        "total_requests": stats["requests"],
+                        "approval_rate": (stats["approvals"] / max(stats["requests"], 1)) * 100,
+                        "avg_confidence": round(stats["avg_confidence"], 1),
+                        "avg_latency_ms": round(stats["avg_latency_ms"], 1)
+                    }
+                    
+                    # Add Perplexity-specific metrics
+                    if service == "perplexity" and stats["requests"] > 0:
+                        dashboard_data["service_performance"][service]["avg_citations_per_request"] = round(
+                            stats["citations"] / stats["requests"], 1)
+            
+            return dashboard_data
+            
+        except Exception as e:
+            return {"error": f"Dashboard generation failed: {str(e)}"}
+
+    def log_detailed_validation(self, token: str, trade_data: dict, hyperbolic_review: dict = None, openrouter_review: dict = None, perplexity_review: dict = None, final_decision: dict = None):
+        """
+        Enhanced logging for detailed validation analysis (Phase 3)
+        """
+        try:
+            print(f"\n🔍 DETAILED VALIDATION ANALYSIS - {token}")
+            print(f"{'='*60}")
+            print(f"📊 Trade Context: ${trade_data.get('current_price', 0):.4f} → ${trade_data.get('allora_prediction', 0):.4f} ({trade_data.get('prediction_diff', 0):+.2f}%)")
+            print(f"⚡ Market Condition: {trade_data.get('market_condition', 'UNKNOWN')}")
+            print(f"🎯 Direction: {trade_data.get('direction', 'UNKNOWN')}")
+            
+            # Log individual AI responses
+            if hyperbolic_review and self.hyperbolic_reviewer:
+                approval_icon = "✅" if hyperbolic_review.get("approval") else "❌"
+                print(f"\n{approval_icon} HYPERBOLIC AI:")
+                print(f"   📈 Confidence: {hyperbolic_review.get('confidence', 0)}%")
+                print(f"   ⚠️ Risk Score: {hyperbolic_review.get('risk_score', 0)}/10")
+                if "latency_ms" in hyperbolic_review:
+                    print(f"   ⏱️ Latency: {hyperbolic_review['latency_ms']}ms")
+                print(f"   💭 Reasoning: {hyperbolic_review.get('reasoning', 'N/A')[:100]}...")
+            
+            if openrouter_review and self.openrouter_reviewer:
+                approval_icon = "✅" if openrouter_review.get("approval") else "❌"
+                print(f"\n{approval_icon} OPENROUTER AI:")
+                print(f"   📈 Confidence: {openrouter_review.get('confidence', 0)}%")
+                print(f"   ⚠️ Risk Score: {openrouter_review.get('risk_score', 0)}/10")
+                if "latency_ms" in openrouter_review:
+                    print(f"   ⏱️ Latency: {openrouter_review['latency_ms']}ms")
+                print(f"   💭 Reasoning: {openrouter_review.get('reasoning', 'N/A')[:100]}...")
+            
+            if perplexity_review and self.perplexity_reviewer:
+                approval_icon = "✅" if perplexity_review.get("approval") else "❌"
+                print(f"\n{approval_icon} PERPLEXITY AI:")
+                print(f"   📈 Confidence: {perplexity_review.get('confidence', 0)}%")
+                print(f"   ⚠️ Risk Score: {perplexity_review.get('risk_score', 0)}/10")
+                print(f"   📚 Citations: {perplexity_review.get('citations_count', 0)} sources")
+                print(f"   🏆 Source Quality: {perplexity_review.get('source_quality', 'unknown')}")
+                if "latency_ms" in perplexity_review:
+                    print(f"   ⏱️ Latency: {perplexity_review['latency_ms']}ms")
+                if "approval_score" in perplexity_review:
+                    print(f"   🎯 Approval Score: {perplexity_review['approval_score']:.3f}")
+                print(f"   💭 Reasoning: {perplexity_review.get('reasoning', 'N/A')[:100]}...")
+                
+                # Log market events if available
+                market_events = perplexity_review.get('market_events', {})
+                if market_events:
+                    print(f"   📰 News Impact: {market_events.get('recent_news_impact', 0):.2f}")
+                    print(f"   ⚖️ Regulatory Risk: {market_events.get('regulatory_risk', 'unknown')}")
+            
+            # Log final decision
+            if final_decision:
+                decision_icon = "🚀" if final_decision.get("execute_trade") else "🛑"
+                print(f"\n{decision_icon} FINAL DECISION:")
+                print(f"   📊 Validation Score: {final_decision.get('validation_score', 0):.3f}")
+                print(f"   🎯 Execute Trade: {final_decision.get('execute_trade', False)}")
+                print(f"   📝 Reason: {final_decision.get('reason', 'N/A')}")
+                
+                # Log weight distribution
+                weights = final_decision.get('weights_used', {})
+                if weights:
+                    weight_str = ", ".join([f"{k}: {v:.2f}" for k, v in weights.items()])
+                    print(f"   ⚖️ Weights Used: {weight_str}")
+            
+            print(f"{'='*60}\n")
+            
+        except Exception as e:
+            print(f"⚠️ Error in detailed validation logging: {e}")
+
+    def export_metrics(self, filepath: str = None) -> dict:
+        """
+        Export current metrics to file or return as dict (Phase 3)
+        """
+        if not self.metrics_enabled:
+            return {"error": "Metrics not enabled"}
+        
+        try:
+            export_data = {
+                "export_timestamp": datetime.now().isoformat(),
+                "metrics": self.metrics.copy(),
+                "configuration": {
+                    "services_configured": {
+                        "hyperbolic": self.hyperbolic_reviewer is not None,
+                        "openrouter": self.openrouter_reviewer is not None,
+                        "perplexity": self.perplexity_reviewer is not None
+                    },
+                    "metrics_enabled": self.metrics_enabled,
+                    "mode": self.mode
+                }
+            }
+            
+            if filepath:
+                with open(filepath, 'w') as f:
+                    json.dump(export_data, f, indent=2)
+                print(f"📊 Metrics exported to: {filepath}")
+            
+            return export_data
+            
+        except Exception as e:
+            error_msg = f"Failed to export metrics: {str(e)}"
+            print(f"❌ {error_msg}")
+            return {"error": error_msg}
+
+    def reset_metrics(self):
+        """
+        Reset all metrics to initial state (Phase 3)
+        """
+        if self.metrics_enabled:
+            self.metrics = {
+                "validation_history": [],
+                "consensus_tracking": {"agreements": 0, "disagreements": 0},
+                "performance_stats": {
+                    "hyperbolic": {"requests": 0, "approvals": 0, "avg_confidence": 0, "avg_latency_ms": 0},
+                    "openrouter": {"requests": 0, "approvals": 0, "avg_confidence": 0, "avg_latency_ms": 0},
+                    "perplexity": {"requests": 0, "approvals": 0, "avg_confidence": 0, "avg_latency_ms": 0, "citations": 0}
+                },
+                "trading_performance": {
+                    "trades_validated": 0,
+                    "trades_executed": 0,
+                    "win_rate": 0.0,
+                    "avg_validation_score": 0.0
+                },
+                "system_health": {
+                    "last_health_check": None,
+                    "service_statuses": {}
+                }
+            }
+            print("📊 Metrics reset successfully")
+        else:
+            print("⚠️ Metrics not enabled - cannot reset")

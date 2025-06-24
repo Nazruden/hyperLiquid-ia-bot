@@ -18,7 +18,8 @@ class EnvLoader:
         # AI services are now optional - at least one must be provided
         ai_services = {
             'HYPERBOLIC_API_KEY': os.getenv('HYPERBOLIC_API_KEY'),
-            'OPENROUTER_API_KEY': os.getenv('OPENROUTER_API_KEY')
+            'OPENROUTER_API_KEY': os.getenv('OPENROUTER_API_KEY'),
+            'PERPLEXITY_API_KEY': os.getenv('PERPLEXITY_API_KEY')
         }
         
         # Check for required variables
@@ -29,7 +30,7 @@ class EnvLoader:
         # Validate at least one AI service is configured
         available_ai_services = [name for name, key in ai_services.items() if key]
         if not available_ai_services:
-            raise ValueError("At least one AI service must be configured: HYPERBOLIC_API_KEY or OPENROUTER_API_KEY")
+            raise ValueError("At least one AI service must be configured: HYPERBOLIC_API_KEY, OPENROUTER_API_KEY, or PERPLEXITY_API_KEY")
         
         print(f"Available AI services: {', '.join(available_ai_services)}")
             
@@ -53,6 +54,8 @@ class EnvLoader:
             },
             "openrouter_api_key": os.getenv('OPENROUTER_API_KEY'),
             "openrouter_model": os.getenv('OPENROUTER_MODEL', 'anthropic/claude-3-sonnet'),
+            "perplexity_api_key": os.getenv('PERPLEXITY_API_KEY'),
+            "perplexity_model": os.getenv('PERPLEXITY_MODEL', 'sonar-pro'),
             # Sprint 1.1: Nouvelle logique de validation adaptative
             "validation_score_threshold": float(os.getenv('VALIDATION_SCORE_THRESHOLD', '0.5')),
             "adaptive_thresholds": os.getenv('ADAPTIVE_THRESHOLDS', 'True').lower() == 'true',
@@ -69,7 +72,13 @@ class EnvLoader:
             "lag_detection_enabled": os.getenv('LAG_DETECTION_ENABLED', 'True').lower() == 'true',
             "max_prediction_age_seconds": float(os.getenv('MAX_PREDICTION_AGE_SECONDS', '30')),
             "max_api_latency_seconds": float(os.getenv('MAX_API_LATENCY_SECONDS', '5')),
-            "lag_warning_threshold_seconds": float(os.getenv('LAG_WARNING_THRESHOLD_SECONDS', '15'))
+            "lag_warning_threshold_seconds": float(os.getenv('LAG_WARNING_THRESHOLD_SECONDS', '15')),
+            # Perplexity Configuration
+            "perplexity_base_weight": float(os.getenv('PERPLEXITY_BASE_WEIGHT', '0.25')),
+            "perplexity_timeout": int(os.getenv('PERPLEXITY_TIMEOUT', '10')),
+            "perplexity_max_tokens": int(os.getenv('PERPLEXITY_MAX_TOKENS', '1500')),
+            "perplexity_retry_attempts": int(os.getenv('PERPLEXITY_RETRY_ATTEMPTS', '3')),
+            "perplexity_source_citations_min": int(os.getenv('PERPLEXITY_SOURCE_CITATIONS_MIN', '2'))
         }
         
         return config

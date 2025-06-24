@@ -25,7 +25,8 @@ def test_single_trading_cycle():
         # Initialize components
         print("🔧 Initializing bot components...")
         (address, info, exchange, vault, allora_upshot_key, hyperbolic_api_key, 
-         openrouter_api_key, openrouter_model, check_for_trades, price_gap,
+         openrouter_api_key, openrouter_model, perplexity_api_key, perplexity_model,
+         check_for_trades, price_gap,
          allowed_amount_per_trade, max_leverage, allora_topics) = setup()
 
         manager = OrderManager(exchange, vault, allowed_amount_per_trade, max_leverage, info)
@@ -34,7 +35,8 @@ def test_single_trading_cycle():
         
         # Initialize AlloraMind
         allora_mind = AlloraMind(manager, allora_upshot_key, hyperbolic_api_key, 
-                               openrouter_api_key, openrouter_model, threshold=price_gap)
+                               openrouter_api_key, openrouter_model, 
+                               perplexity_api_key, perplexity_model, threshold=price_gap)
         
         # Set topic IDs
         allora_mind.topic_ids = {'BTC': 1, 'ETH': 2}
