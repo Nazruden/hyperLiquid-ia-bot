@@ -85,7 +85,16 @@ allora/
 └── allora_mind.py     # AlloraMind - Main AI coordination engine
 ```
 
-### C₃: Strategy Framework
+### C₃: Communication & Contrôle (File-based Command Queue)
+
+- **Objectif :** Assurer une communication fiable et asynchrone entre le tableau de bord (processus backend) et le bot de trading (processus indépendant).
+- **Mécanisme :**
+  - **Écriture :** Le backend écrit des commandes sous forme de fichiers `.json` dans le répertoire `tmp/commands/pending/`.
+  - **Lecture :** Le bot scanne périodiquement ce répertoire, traite les fichiers de commande par ordre chronologique.
+  - **Archivage :** Les commandes traitées sont déplacées vers `tmp/commands/processed/` ou `tmp/commands/failed/` pour l'audit et le débogage.
+- **Avantages :** Ce système de file par fichiers élimine les problèmes de concurrence de base de données (verrouillage SQLite) et garantit qu'aucune commande n'est perdue.
+
+### C₄: Strategy Framework
 
 ```
 strategy/
@@ -96,17 +105,17 @@ strategy/
 └── volatility_strategy.py    # Volatility-based trading logic
 ```
 
-### C₄: Data & Analytics
+### C₅: Data & Analytics
 
 ```
 database/
-└── db_manager.py      # DatabaseManager - SQLite operations
+└── db_manager.py      # DatabaseManager - SQLite operations (hors commandes bot)
 
 analysis/
 └── performance_analyzer.py # Real-time performance tracking
 ```
 
-### C₅: Utilities & Configuration
+### C₆: Utilities & Configuration
 
 ```
 utils/

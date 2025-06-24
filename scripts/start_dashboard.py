@@ -10,6 +10,7 @@ import time
 import signal
 import os
 from pathlib import Path
+import threading
 
 class DashboardLauncher:
     def __init__(self):
@@ -49,6 +50,17 @@ class DashboardLauncher:
         print("✅ Dashboard prerequisites found")
         return True
         
+    def _start_stream_reader(self, stream, prefix):
+        """Starts a thread to read and print from a stream."""
+        def reader_thread():
+            for line in iter(stream.readline, ''):
+                print(f"[{prefix}] {line}", end='')
+            stream.close()
+        
+        thread = threading.Thread(target=reader_thread)
+        thread.daemon = True
+        thread.start()
+        
     def start_dashboard_backend(self):
         """Start FastAPI dashboard backend"""
         print("\n⚙️ Starting Dashboard Backend...")
@@ -63,7 +75,16 @@ class DashboardLauncher:
                 "--host", "127.0.0.1", 
                 "--port", "8000", 
                 "--reload"
-            ], cwd=self.root_dir)
+            ], cwd=self.root_dir,
+               stdout=subprocess.PIPE,
+               stderr=subprocess.PIPE,
+               text=True,
+               encoding='utf-8',
+               errors='replace'
+            )
+
+            self._start_stream_reader(process.stdout, "Backend-out")
+            self._start_stream_reader(process.stderr, "Backend-err")
             
             self.processes.append(("Dashboard Backend", process))
             print("✅ Dashboard Backend started (PID:", process.pid, ")")
@@ -88,8 +109,16 @@ class DashboardLauncher:
                 
             process = subprocess.Popen(
                 ["npm", "run", "dev"],
-                cwd=frontend_dir
+                cwd=frontend_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding='utf-8',
+                errors='replace'
             )
+
+            self._start_stream_reader(process.stdout, "Frontend-out")
+            self._start_stream_reader(process.stderr, "Frontend-err")
             
             self.processes.append(("Dashboard Frontend", process))
             print("✅ Dashboard Frontend started (PID:", process.pid, ")")

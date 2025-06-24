@@ -29,6 +29,7 @@ class AlloraMind:
         self.timeout = 5
         self.base_url = ALLORA_API_BASE_URL
         self.db = DatabaseManager()
+        self.project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         
         # ===== CRYPTO MANAGEMENT & MODE CONTROL =====
         self.mode = os.getenv('BOT_DEFAULT_MODE', 'STANDBY')  # STANDBY, ACTIVE
@@ -625,62 +626,80 @@ class AlloraMind:
                 print(f"  Prediction Difference: {pred_diff_percent:+.2%}")
 
     def start_allora_trade_bot(self, interval=180):
-        """
-        Starts the trading and monitoring process with STANDBY/ACTIVE mode support.
-        :param interval: Time in seconds between checks (default: 180 seconds).
-        """
-        print(f"🤖 AlloraMind starting in {self.mode} mode")
-        print(f"📡 Command check interval: {self.command_check_interval}s")
-        print(f"🔄 Trading interval: {interval}s")
-        
+        # Initial call to set mode based on startup config
+        self.check_dashboard_commands()
+
         while True:
-            current_time = time.time()
-            
-            # Check for dashboard commands periodically
-            if current_time - self.last_command_check >= self.command_check_interval:
-                self.check_dashboard_commands()
-                self.last_command_check = current_time
-            
-            # Execute based on current mode
-            if self.mode == "ACTIVE" and self.monitoring_enabled and self.topic_ids:
-                print("🟢 ACTIVE mode - Running trading and position monitoring...")
+            if self.mode == 'ACTIVE':
+                print(f"\n🚀 AlloraMind is in ACTIVE mode. Monitoring for trades... ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})")
+                self.monitoring_enabled = True
                 self.open_trade()
-                self.monitor_positions()
-                print(f"💤 Sleeping for {interval} seconds...")
-                time.sleep(interval)
-            elif self.mode == "STANDBY":
-                print("🟡 STANDBY mode - Bot is idle, waiting for activation...")
-                time.sleep(self.command_check_interval)  # Check commands more frequently in standby
-            else:
-                print("⚠️ ACTIVE mode but no cryptocurrencies configured - waiting...")
-                time.sleep(self.command_check_interval)
-                
-    def check_dashboard_commands(self):
-        """Check for pending commands from dashboard and execute them"""
-        try:
-            commands = self.db.get_pending_commands()
+            elif self.mode == 'STANDBY':
+                if self.monitoring_enabled:
+                    print(f"\n🛑 AlloraMind is now in STANDBY mode. Trading is paused. ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})")
+                    self.monitoring_enabled = False
             
-            for command in commands:
-                try:
-                    success = self.execute_command(command)
-                    self.db.mark_command_executed(
-                        command['id'], 
-                        success=success,
-                        error_message=None if success else "Command execution failed"
-                    )
-                except Exception as e:
-                    print(f"❌ Error executing command {command['id']}: {e}")
-                    self.db.mark_command_executed(
-                        command['id'], 
-                        success=False, 
-                        error_message=str(e)
-                    )
-                    
-        except Exception as e:
-            print(f"❌ Error checking commands: {e}")
-    
+            # Check for commands regardless of mode
+            self.check_dashboard_commands()
+            
+            # Wait for the next cycle
+            time.sleep(self.command_check_interval)
+
+    def check_dashboard_commands(self):
+        """Periodically checks for commands from the dashboard via the file system queue."""
+        # This check is now managed by the main loop's sleep interval.
+        # We process all available commands in each cycle.
+
+        command_dir = os.path.join(self.project_root, "tmp", "commands", "pending")
+        processed_dir = os.path.join(self.project_root, "tmp", "commands", "processed")
+        failed_dir = os.path.join(self.project_root, "tmp", "commands", "failed")
+
+        # Ensure directories exist
+        os.makedirs(processed_dir, exist_ok=True)
+        os.makedirs(failed_dir, exist_ok=True)
+        
+        if not os.path.exists(command_dir):
+            return
+
+        # Sort to process in FIFO order
+        command_files = sorted(os.listdir(command_dir))
+        if not command_files:
+            return
+
+        print(f"🤖 Found {len(command_files)} pending command(s) in queue...")
+        for filename in command_files:
+            filepath = os.path.join(command_dir, filename)
+            if not filename.endswith('.json'):
+                print(f"  - Skipping non-json file: {filename}")
+                continue
+            
+            destination_dir = failed_dir
+            try:
+                with open(filepath, "r") as f:
+                    command = json.load(f)
+
+                print(f"  - Processing command: {command.get('command_type', 'N/A')} ({filename})")
+                success = self.execute_command(command)
+
+                if success:
+                    destination_dir = processed_dir
+                else:
+                    print(f"  - Command execution failed. Moving to '{os.path.basename(failed_dir)}' directory.")
+            
+            except json.JSONDecodeError as e:
+                print(f"❌ Error decoding JSON from command file {filename}: {e}")
+            except Exception as e:
+                print(f"❌ Unhandled error processing command file {filename}: {e}")
+            
+            try:
+                os.rename(filepath, os.path.join(destination_dir, filename))
+            except Exception as move_e:
+                print(f"❌ CRITICAL: Could not move command file {filename} to destination: {move_e}")
+
     def execute_command(self, command) -> bool:
-        """Execute a dashboard command"""
+        """
+        Executes a command received from the dashboard.
+        """
         try:
             command_type = command['command_type']
             command_data = command.get('command_data', {})
@@ -710,12 +729,19 @@ class AlloraMind:
     def set_mode_active(self, data) -> bool:
         """Activate monitoring mode"""
         try:
-            active_cryptos = data.get('active_cryptos', {})
+            # Fetch active cryptos from the database directly
+            active_cryptos = self.db.get_active_cryptos()
             
             if not active_cryptos:
-                print("⚠️ Cannot activate: No active cryptocurrencies configured")
-                return False
-            
+                print("⚠️ Cannot activate: No active cryptocurrencies configured in the database.")
+                # We can still switch to ACTIVE mode, but it will be idle.
+                # This allows activating the mode first, then configuring cryptos.
+                self.mode = "ACTIVE"
+                self.monitoring_enabled = False # No cryptos to monitor yet
+                self.topic_ids = {}
+                print("🟡 Bot is ACTIVE but has no cryptos to trade. Configure cryptos via the dashboard.")
+                return True
+
             self.mode = "ACTIVE"
             self.monitoring_enabled = True
             self.topic_ids = active_cryptos

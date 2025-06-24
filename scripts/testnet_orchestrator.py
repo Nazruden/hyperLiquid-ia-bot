@@ -37,6 +37,17 @@ class TestnetOrchestrator:
         self.shutdown_all_services()
         sys.exit(0)
         
+    def _start_stream_reader(self, stream, prefix):
+        """Starts a thread to read and print from a stream."""
+        def reader_thread():
+            for line in iter(stream.readline, ''):
+                self.log(f"[{prefix}] {line.strip()}", "PROCESS")
+            stream.close()
+        
+        thread = threading.Thread(target=reader_thread)
+        thread.daemon = True
+        thread.start()
+        
     def start_service(self, name, command, cwd=None, env_vars=None):
         """Start a service and monitor it"""
         self.log(f"🚀 Starting {name}...")
@@ -47,27 +58,22 @@ class TestnetOrchestrator:
             env.update(env_vars)
             
         try:
-            # ✅ FIX: Don't redirect output for any long-running services to prevent buffer overflow
+            # Consistent, secure, and robust process startup for all services
+            process = subprocess.Popen(
+                command,
+                cwd=cwd or self.root_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                env=env
+            )
+
+            # Start stream readers for long-running services to capture output
             if name in ["Trading Bot", "Dashboard Backend", "Dashboard Frontend"]:
-                # Let long-running services output go to console directly
-                process = subprocess.Popen(
-                    command,
-                    cwd=cwd or self.root_dir,
-                    text=True,
-                    env=env,
-                    shell=True if isinstance(command, str) else False
-                )
-            else:
-                # Only short-running services (like npm install) can have redirected output
-                process = subprocess.Popen(
-                    command,
-                    cwd=cwd or self.root_dir,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    env=env,
-                    shell=True if isinstance(command, str) else False
-                )
+                self._start_stream_reader(process.stdout, f"{name}-out")
+                self._start_stream_reader(process.stderr, f"{name}-err")
             
             self.processes[name] = process
             self.log(f"✅ {name} started (PID: {process.pid})")
@@ -137,14 +143,17 @@ class TestnetOrchestrator:
             self.log("📦 Installing frontend dependencies...")
             npm_install = self.start_service(
                 "NPM Install", 
-                "npm install", 
+                ["npm", "install"], # Use list format to avoid shell=True
                 cwd=frontend_dir
             )
             if npm_install:
-                npm_install.wait()  # Wait for installation to complete
+                exit_code = npm_install.wait() # Wait for installation to complete
+                if exit_code != 0:
+                    self.log(f"❌ NPM Install failed with exit code {exit_code}", "ERROR")
+                    return False
                 
         # Start the frontend dev server
-        frontend_cmd = "npm run dev"
+        frontend_cmd = ["npm", "run", "dev"] # Use list format
         process = self.start_service("Dashboard Frontend", frontend_cmd, cwd=frontend_dir)
         
         if process:
@@ -160,7 +169,7 @@ class TestnetOrchestrator:
         
     def start_trading_bot(self):
         """Start the main trading bot"""
-        bot_cmd = [sys.executable, "main.py"]
+        bot_cmd = [sys.executable, "-u", "main.py"] # Add -u for unbuffered output
         process = self.start_service("Trading Bot", bot_cmd)
         
         if process:
@@ -169,55 +178,22 @@ class TestnetOrchestrator:
         return False
         
     def monitor_processes(self):
-        """Monitor all processes and restart if needed"""
+        """Monitor all processes and handle termination"""
         while self.running:
             for name, process in list(self.processes.items()):
                 if process.poll() is not None:  # Process has terminated
                     exit_code = process.returncode
+                    self.log(f"ℹ️ {name} has stopped with exit code: {exit_code}", "WARNING")
                     
-                    # ✅ FIX: Don't restart short-running tasks that completed successfully
-                    if name == "NPM Install":
-                        if exit_code == 0:
-                            self.log(f"✅ {name} completed successfully")
-                        else:
-                            self.log(f"❌ {name} failed with exit code: {exit_code}", "ERROR")
-                        # Remove from processes list - don't restart
-                        del self.processes[name]
-                        continue
-                    
-                    # ✅ Only restart long-running services that stopped unexpectedly
-                    if name in ["Trading Bot", "Dashboard Backend", "Dashboard Frontend"]:
-                        self.log(f"⚠️ {name} has stopped unexpectedly (exit code: {exit_code})", "WARNING")
-                        
-                        # ✅ Enhanced debugging: Log stderr/stdout if available
-                        if hasattr(process, 'stderr') and process.stderr:
-                            try:
-                                stderr_output = process.stderr.read()
-                                if stderr_output:
-                                    self.log(f"🔴 {name} stderr: {stderr_output[:500]}", "ERROR")
-                            except:
-                                pass
-                        
-                        # ✅ Don't restart too aggressively for Dashboard Backend
-                        if name == "Dashboard Backend":
-                            # Check if we've restarted too many times recently
-                            restart_count = getattr(self, f"{name}_restart_count", 0)
-                            if restart_count >= 5:
-                                self.log(f"❌ {name} failed too many times, stopping auto-restart", "ERROR")
-                                del self.processes[name]
-                                continue
-                            setattr(self, f"{name}_restart_count", restart_count + 1)
-                            
-                            self.log(f"🔄 Restarting {name} (attempt {restart_count + 1}/5)...")
-                            time.sleep(2)  # Brief delay before restart
-                            self.start_dashboard_backend()
-                        elif name == "Trading Bot":
-                            self.log("🔄 Restarting Trading Bot...")
-                            self.start_trading_bot()
-                    else:
-                        # Unknown service - just log and remove
-                        self.log(f"ℹ️ {name} stopped (exit code: {exit_code})")
-                        del self.processes[name]
+                    # Log any remaining output
+                    stdout, stderr = process.communicate()
+                    if stdout:
+                        self.log(f"[{name}-out] {stdout.strip()}", "PROCESS")
+                    if stderr:
+                        self.log(f"[{name}-err] {stderr.strip()}", "PROCESS")
+
+                    # Remove from processes list. Let user decide to restart.
+                    del self.processes[name]
                         
             time.sleep(5)  # Check every 5 seconds
             

@@ -178,6 +178,14 @@ class BotProcessController:
                 stdout, stderr = self.bot_process.communicate()
                 error_msg = f"Bot failed to start. Exit code: {self.bot_process.returncode}"
                 
+                # Log to a file for better debugging
+                log_file_path = os.path.join(os.path.dirname(self.bot_script_path), "bot_startup_error.log")
+                with open(log_file_path, "w") as f:
+                    f.write("--- STDOUT ---\n")
+                    f.write(stdout)
+                    f.write("\n--- STDERR ---\n")
+                    f.write(stderr)
+
                 logger.error(f"{error_msg}\nStdout: {stdout}\nStderr: {stderr}")
                 
                 return {

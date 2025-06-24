@@ -62,17 +62,38 @@ class SystemLauncher:
         print("   • Working Dir:", self.root_dir)
         
         try:
+            # Redirect stdout and stderr and set encoding to utf-8 to prevent UnicodeEncodeError
             process = subprocess.Popen(
-                [sys.executable, "main.py"],
+                [sys.executable, "-u", "main.py"], # -u for unbuffered output
                 cwd=self.root_dir,
-                universal_newlines=True
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding='utf-8',
+                errors='replace' # Replace characters that can't be decoded
             )
+
+            # Start threads to read stdout and stderr in a non-blocking way
+            self._start_stream_reader(process.stdout, "Bot-out")
+            self._start_stream_reader(process.stderr, "Bot-err")
+
             self.processes.append(("Trading Bot", process))
             print("✅ Trading Bot started (PID:", process.pid, ")")
             return True
         except Exception as e:
             print(f"❌ Failed to start Trading Bot: {e}")
             return False
+            
+    def _start_stream_reader(self, stream, prefix):
+        """Starts a thread to read and print from a stream."""
+        def reader_thread():
+            for line in iter(stream.readline, ''):
+                print(f"[{prefix}] {line}", end='')
+            stream.close()
+        
+        thread = threading.Thread(target=reader_thread)
+        thread.daemon = True
+        thread.start()
             
     def start_dashboard_backend(self):
         """Start FastAPI dashboard backend"""

@@ -7,6 +7,7 @@ import sqlite3
 from datetime import datetime
 import os
 import json
+import uuid
 from colorama import Fore, Style
 import logging
 
@@ -18,6 +19,7 @@ class DatabaseManager:
     def __init__(self):
         # Use environment variable if available, otherwise default to trading_logs.db
         self.db_path = os.getenv('DB_PATH', 'trading_logs.db')
+        self.project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         logger.info(f"Initializing database at {self.db_path}")
         self._create_tables()
     
@@ -44,18 +46,18 @@ class DatabaseManager:
             )
         """)
         
-        # Bot commands table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS bot_commands (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                command_type TEXT NOT NULL,
-                command_data TEXT,
-                status TEXT DEFAULT 'PENDING',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                executed_at TIMESTAMP,
-                error_message TEXT
-            )
-        """)
+        # Bot commands table (now handled by file-based queue)
+        # cursor.execute("""
+        #     CREATE TABLE IF NOT EXISTS bot_commands (
+        #         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        #         command_type TEXT NOT NULL,
+        #         command_data TEXT,
+        #         status TEXT DEFAULT 'PENDING',
+        #         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        #         executed_at TIMESTAMP,
+        #         error_message TEXT
+        #     )
+        # """)
         
         conn.commit()
         conn.close()
@@ -249,120 +251,61 @@ class DatabaseManager:
         finally:
             conn.close()
 
-    # ===== BOT COMMAND METHODS =====
+    # ===== BOT COMMAND METHODS (File-based Queue) =====
     
     def add_bot_command(self, command_type, command_data=None):
-        """Add a new bot command to the queue"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
+        """Creates a command file for the bot to execute."""
         try:
-            cursor.execute("""
-                INSERT INTO bot_commands (command_type, command_data, status, created_at)
-                VALUES (?, ?, 'PENDING', ?)
-            """, (
-                command_type, 
-                json.dumps(command_data) if command_data else None,
-                datetime.now()
-            ))
-            
-            command_id = cursor.lastrowid
-            conn.commit()
-            print(f"{Fore.CYAN}📨 Added bot command: {command_type} (ID: {command_id}){Style.RESET_ALL}")
-            logger.info(f"Added bot command: {command_type} (ID: {command_id})")
+            command_dir = os.path.join(self.project_root, "tmp", "commands", "pending")
+            os.makedirs(command_dir, exist_ok=True)
+
+            command_id = str(uuid.uuid4())
+            file_path = os.path.join(command_dir, f"{command_id}.json")
+
+            command_content = {
+                "id": command_id,
+                "command_type": command_type,
+                "data": command_data,
+                "timestamp": datetime.now().isoformat()
+            }
+
+            with open(file_path, "w") as f:
+                json.dump(command_content, f)
+
+            print(f"📨 Fichier de commande créé : {file_path}")
+            logger.info(f"Command file created: {file_path}")
             return command_id
-            
+
         except Exception as e:
-            print(f"{Fore.RED}❌ Error adding bot command: {e}{Style.RESET_ALL}")
-            logger.error(f"Error adding bot command {command_type}: {e}")
+            print(f"❌ Error creating command file for {command_type}: {e}")
+            logger.error(f"Error creating command file for {command_type}: {e}")
             return None
-        finally:
-            conn.close()
-    
+
     def get_pending_commands(self):
-        """Get all pending bot commands"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        try:
-            cursor.execute("""
-                SELECT id, command_type, command_data, created_at
-                FROM bot_commands 
-                WHERE status = 'PENDING'
-                ORDER BY created_at ASC
-            """)
-            
-            commands = []
-            for row in cursor.fetchall():
-                commands.append({
-                    'id': row[0],
-                    'command_type': row[1],
-                    'command_data': json.loads(row[2]) if row[2] else None,
-                    'created_at': row[3]
-                })
-            
-            return commands
-            
-        except Exception as e:
-            logger.error(f"Error getting pending commands: {e}")
-            return []
-        finally:
-            conn.close()
-    
+        """
+        DEPRECATED: This method is no longer used with the file-based queue.
+        The bot now reads directly from the tmp/commands/pending directory.
+        """
+        logger.warning("get_pending_commands is deprecated and should not be used.")
+        return []
+
     def mark_command_executed(self, command_id, success=True, error_message=None):
-        """Mark a bot command as executed"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        status = 'EXECUTED' if success else 'FAILED'
-        
-        try:
-            cursor.execute("""
-                UPDATE bot_commands 
-                SET status = ?, executed_at = ?, error_message = ?
-                WHERE id = ?
-            """, (status, datetime.now(), error_message, command_id))
-            
-            conn.commit()
-            status_icon = "✅" if success else "❌"
-            print(f"{Fore.GREEN}{status_icon} Command {command_id} marked as {status}{Style.RESET_ALL}")
-            logger.info(f"Command {command_id} marked as {status}")
-            return True
-            
-        except Exception as e:
-            print(f"{Fore.RED}❌ Error updating command status: {e}{Style.RESET_ALL}")
-            logger.error(f"Error updating command {command_id} status: {e}")
-            return False
-        finally:
-            conn.close()
-    
+        """
+        DEPRECATED: This method is no longer used.
+        Command files are moved to the 'processed' directory by the bot.
+        """
+        logger.warning("mark_command_executed is deprecated and should not be used.")
+        pass
+
     def cleanup_old_commands(self, days_old=7):
-        """Clean up old executed commands"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        try:
-            cursor.execute("""
-                DELETE FROM bot_commands 
-                WHERE status IN ('EXECUTED', 'FAILED') 
-                AND executed_at < datetime('now', '-{} days')
-            """.format(days_old))
-            
-            deleted_count = cursor.rowcount
-            conn.commit()
-            
-            if deleted_count > 0:
-                logger.info(f"Cleaned up {deleted_count} old commands")
-            
-            return deleted_count
-            
-        except Exception as e:
-            logger.error(f"Error cleaning up old commands: {e}")
-            return 0
-        finally:
-            conn.close()
-    
-    # ===== UTILITY METHODS =====
+        """
+        DEPRECATED: This method is no longer used.
+        Old command files in 'processed' directory can be cleaned up with a separate script if needed.
+        """
+        logger.warning("cleanup_old_commands is deprecated and should not be used.")
+        pass
+
+    # ===== DATABASE STATISTICS =====
     
     def get_database_stats(self):
         """Get database statistics"""

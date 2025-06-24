@@ -1,3 +1,36 @@
+## 🔄 **Fiabilisation & Améliorations des Scripts (COMPLETED)**
+
+### **✅ Communication Fiabilisée entre Dashboard et Bot**
+
+**Problème initial :** Les commandes envoyées depuis le tableau de bord (ex: passer le bot en mode `ACTIVE`) n'étaient pas reçues par le processus du bot à cause de problèmes de concurrence avec la base de données SQLite.
+
+**Solution implémentée :**
+
+- **File de Commandes par Fichiers :** Abandon de la table `bot_commands` dans SQLite pour la communication descendante.
+- **Nouveau Mécanisme :**
+  1. Le backend écrit maintenant un fichier `.json` pour chaque commande dans un répertoire `tmp/commands/pending/`.
+  2. Le processus du bot surveille ce répertoire, traite chaque fichier de commande, puis le déplace dans `tmp/commands/processed/` (ou `failed/` en cas d'erreur).
+- **Avantages :**
+  - **Fiabilité :** Découplage complet des processus, éliminant les verrous et les problèmes de synchronisation de la base de données.
+  - **Robustesse :** Chaque commande est atomique et son état (traité, échoué) est facilement auditable via le système de fichiers.
+  - **Performance :** N'impacte pas les performances de la base de données principale.
+
+### **✅ Refonte Complète des Scripts de Démarrage**
+
+**Problème initial :** Les scripts dans le dossier `scripts/` étaient peu fiables, en particulier sur Windows. Ils masquaient les erreurs des sous-processus (notamment les `UnicodeEncodeError`) et utilisaient des pratiques non sécurisées (`shell=True`).
+
+**Solution implémentée :**
+
+- **Standardisation :** Tous les scripts de démarrage (`start_all.py`, `start_dashboard.py`, ainsi que leurs versions `hotreload`) ont été refactorisés pour utiliser une approche unifiée et robuste.
+- **Capture de Sortie en Temps Réel :**
+  - Implémentation d'un `_start_stream_reader` qui utilise des threads pour lire et afficher en temps réel les sorties `stdout` et `stderr` de tous les sous-processus.
+  - Les erreurs, y compris celles de `jurigged` et de Python, sont maintenant immédiatement visibles et préfixées pour un débogage facile.
+- **Correction des Erreurs Spécifiques :**
+  - **`UnicodeEncodeError` :** Résolue en forçant la variable d'environnement `PYTHONIOENCODING='utf-8'` pour les processus Python sur Windows.
+  - **`npm` non trouvé :** Résolu en utilisant `npm.cmd` sur Windows.
+  - **Argument `-u` mal placé :** Corrigé pour que `python -u -m jurigged` soit appelé correctement.
+- **Sécurité et Fiabilité :** Suppression complète de `shell=True`, remplacé par des listes d'arguments pour les commandes.
+
 # σ₅: Progress Tracker
 
 _v1.0 | Created: 2025-01-25 | Updated: 2025-01-25_

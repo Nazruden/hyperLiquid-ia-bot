@@ -33,43 +33,54 @@ class TestnetOrchestrator:
         print(f"[{timestamp}] {mode_indicator} {level}: {message}")
         
     def signal_handler(self, signum, frame):
-        """Handle Ctrl+C and graceful shutdown"""
-        self.log("🛑 Shutdown signal received", "WARNING")
-        self.running = False
-        self.shutdown_all_services()
-        sys.exit(0)
+        """Handle Ctrl+C and graceful shutdown by setting a flag."""
+        if self.running:
+            self.log("🛑 Shutdown signal received, initiating graceful shutdown...", "WARNING")
+            self.running = False
+        # Do not call shutdown_all_services() here, let the main loop handle it.
+        
+    def _start_stream_reader(self, stream, prefix):
+        """Starts a thread to read and print from a stream."""
+        def reader_thread():
+            # Use self.log for consistent output formatting
+            for line in iter(stream.readline, ''):
+                self.log(f"[{prefix}] {line.strip()}", "PROCESS")
+            stream.close()
+        
+        thread = threading.Thread(target=reader_thread)
+        thread.daemon = True
+        thread.start()
         
     def start_service(self, name, command, cwd=None, env_vars=None):
-        """Start a service and monitor it"""
+        """Start a service securely and robustly, capturing its output."""
         self.log(f"🚀 Starting {name}...")
         
         # Prepare environment
         env = os.environ.copy()
         if env_vars:
             env.update(env_vars)
+
+        # Force Python to use UTF-8 for its standard streams
+        if sys.platform == "win32" and "python" in command[0]:
+            env['PYTHONIOENCODING'] = 'utf-8'
             
         try:
-            # ✅ FIX: Don't redirect output for any long-running services to prevent buffer overflow
+            # Consistent, secure, and robust process startup for all services
+            process = subprocess.Popen(
+                command,
+                cwd=cwd or self.root_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                env=env
+            )
+
+            # Start stream readers for long-running services to capture output
             if name in ["Trading Bot", "Dashboard Backend", "Dashboard Frontend"]:
-                # Let long-running services output go to console directly
-                process = subprocess.Popen(
-                    command,
-                    cwd=cwd or self.root_dir,
-                    text=True,
-                    env=env,
-                    shell=True if isinstance(command, str) else False
-                )
-            else:
-                # Only short-running services (like npm install) can have redirected output
-                process = subprocess.Popen(
-                    command,
-                    cwd=cwd or self.root_dir,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    env=env,
-                    shell=True if isinstance(command, str) else False
-                )
+                self._start_stream_reader(process.stdout, f"{name}-out")
+                self._start_stream_reader(process.stderr, f"{name}-err")
             
             self.processes[name] = process
             self.log(f"✅ {name} started (PID: {process.pid})")
@@ -171,14 +182,20 @@ class TestnetOrchestrator:
             self.log("📦 Installing frontend dependencies...")
             npm_install = self.start_service(
                 "NPM Install", 
-                "npm install", 
+                ["npm", "install"],
                 cwd=frontend_dir
             )
             if npm_install:
-                npm_install.wait()  # Wait for installation to complete
+                exit_code = npm_install.wait()  # Wait for installation to complete
+                if exit_code != 0:
+                    self.log(f"❌ NPM Install failed with exit code {exit_code}", "ERROR")
+                    return False
                 
         # Start the frontend dev server
-        frontend_cmd = "npm run dev"
+        frontend_cmd = ["npm", "run", "dev"]
+        if sys.platform == "win32":
+            frontend_cmd = ["npm.cmd", "run", "dev"]
+
         process = self.start_service("Dashboard Frontend", frontend_cmd, cwd=frontend_dir)
         
         if process:
@@ -196,8 +213,9 @@ class TestnetOrchestrator:
         """Start the main trading bot with optional hot reload"""
         if self.hot_reload:
             # Start with jurigged, watching all relevant directories
+            # The -u flag must come after python and before -m
             bot_cmd = [
-                sys.executable, "-m", "jurigged", 
+                sys.executable, "-u", "-m", "jurigged", 
                 "-v",  # Verbose mode to see what's being reloaded
                 "-w", "strategy/",      # Watch strategy directory
                 "-w", "allora/",        # Watch allora directory
@@ -209,7 +227,7 @@ class TestnetOrchestrator:
                 "main.py"
             ]
         else:
-            bot_cmd = [sys.executable, "main.py"]
+            bot_cmd = [sys.executable, "-u", "main.py"] # Unbuffered output
             
         process = self.start_service("Trading Bot", bot_cmd)
         
@@ -220,55 +238,18 @@ class TestnetOrchestrator:
         return False
         
     def monitor_processes(self):
-        """Monitor all processes and restart if needed"""
+        """Monitor all processes and handle termination"""
         while self.running:
             for name, process in list(self.processes.items()):
                 if process.poll() is not None:  # Process has terminated
                     exit_code = process.returncode
+                    self.log(f"ℹ️ {name} has stopped with exit code: {exit_code}", "WARNING")
                     
-                    # ✅ FIX: Don't restart short-running tasks that completed successfully
-                    if name == "NPM Install":
-                        if exit_code == 0:
-                            self.log(f"✅ {name} completed successfully")
-                        else:
-                            self.log(f"❌ {name} failed with exit code: {exit_code}", "ERROR")
-                        # Remove from processes list - don't restart
-                        del self.processes[name]
-                        continue
+                    # Log any remaining output from the process streams
+                    # This is now handled by the continuously running reader threads
                     
-                    # ✅ Only restart long-running services that stopped unexpectedly
-                    if name in ["Trading Bot", "Dashboard Backend", "Dashboard Frontend"]:
-                        self.log(f"⚠️ {name} has stopped unexpectedly (exit code: {exit_code})", "WARNING")
-                        
-                        # ✅ Enhanced debugging: Log stderr/stdout if available
-                        if hasattr(process, 'stderr') and process.stderr:
-                            try:
-                                stderr_output = process.stderr.read()
-                                if stderr_output:
-                                    self.log(f"🔴 {name} stderr: {stderr_output[:500]}", "ERROR")
-                            except:
-                                pass
-                        
-                        # ✅ Don't restart too aggressively for Dashboard Backend
-                        if name == "Dashboard Backend":
-                            # Check if we've restarted too many times recently
-                            restart_count = getattr(self, f"{name}_restart_count", 0)
-                            if restart_count >= 5:
-                                self.log(f"❌ {name} failed too many times, stopping auto-restart", "ERROR")
-                                del self.processes[name]
-                                continue
-                            setattr(self, f"{name}_restart_count", restart_count + 1)
-                            
-                            self.log(f"🔄 Restarting {name} (attempt {restart_count + 1}/5)...")
-                            time.sleep(2)  # Brief delay before restart
-                            self.start_dashboard_backend()
-                        elif name == "Trading Bot":
-                            self.log("🔄 Restarting Trading Bot...")
-                            self.start_trading_bot()
-                    else:
-                        # Unknown service - just log and remove
-                        self.log(f"ℹ️ {name} stopped (exit code: {exit_code})")
-                        del self.processes[name]
+                    # Remove from processes list. The user can decide to restart the orchestrator.
+                    del self.processes[name]
                         
             time.sleep(5)  # Check every 5 seconds
             
@@ -403,57 +384,36 @@ class TestnetOrchestrator:
 
 
 def main():
-    """Main orchestrator function with hot reload option"""
+    """Main function to run the orchestrator with argument parsing"""
     import argparse
-    
     parser = argparse.ArgumentParser(
-        description="HyperLiquid AI Trading Bot - TESTNET Orchestrator",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  python scripts/testnet_orchestrator_hotreload.py           # Standard mode
-  python scripts/testnet_orchestrator_hotreload.py --hot     # Hot reload mode
-  python scripts/testnet_orchestrator_hotreload.py --hotreload  # Alternative flag
-        """
+        description="HyperLiquid AI Trading Bot - Testnet Orchestrator with Hot Reload",
+        formatter_class=argparse.RawTextHelpFormatter
     )
     
     parser.add_argument(
-        "--hot", "--hotreload", 
-        action="store_true",
-        help="Enable hot reload mode with jurigged (recommended for development)"
+        '--no-hot-reload',
+        action='store_true',
+        help="Run without hot reloading features (standard mode)."
     )
     
     args = parser.parse_args()
     
-    mode_text = "🔥 HOT RELOAD" if args.hot else "STANDARD"
-    print(f"🚀 HyperLiquid AI Trading Bot - TESTNET Orchestrator ({mode_text})")
-    print("=" * 65)
+    # Hot reload is on by default, turned off by the flag
+    hot_reload_enabled = not args.no_hot_reload
     
-    # Check if we're in the right directory
-    if not Path("main.py").exists():
-        print("❌ Error: Please run from the project root directory")
-        sys.exit(1)
-        
-    # Check if .env exists
-    if not Path(".env").exists():
-        print("❌ Error: .env file not found. Run deploy_testnet.py first.")
-        sys.exit(1)
-        
-    orchestrator = TestnetOrchestrator(hot_reload=args.hot)
-    
+    orchestrator = TestnetOrchestrator(hot_reload=hot_reload_enabled)
     try:
-        success = orchestrator.run_deployment()
-        if success:
-            print(f"\n✅ Testnet deployment completed successfully ({mode_text})")
-        else:
-            print(f"\n❌ Testnet deployment failed")
-            sys.exit(1)
+        orchestrator.run_deployment()
+    except KeyboardInterrupt:
+        print() # Newline after Ctrl+C
+        orchestrator.log("Deployment cancelled by user.", "INFO")
     except Exception as e:
-        print(f"\n💥 Unexpected error: {e}")
-        orchestrator.shutdown_all_services()
-        sys.exit(1)
+        orchestrator.log(f"An unexpected error occurred: {e}", "CRITICAL")
     finally:
         orchestrator.shutdown_all_services()
+        orchestrator.log("Orchestrator has shut down.", "INFO")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

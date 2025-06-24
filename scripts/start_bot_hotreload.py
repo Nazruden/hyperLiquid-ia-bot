@@ -10,6 +10,7 @@ import time
 import signal
 import os
 from pathlib import Path
+import threading
 
 class BotHotReloadLauncher:
     def __init__(self):
@@ -64,6 +65,17 @@ class BotHotReloadLauncher:
         print("✅ All prerequisites found")
         return True
         
+    def _start_stream_reader(self, stream, prefix):
+        """Starts a thread to read and print from a stream."""
+        def reader_thread():
+            for line in iter(stream.readline, ''):
+                print(f"[{prefix}] {line}", end='')
+            stream.close()
+        
+        thread = threading.Thread(target=reader_thread)
+        thread.daemon = True
+        thread.start()
+        
     def start_trading_bot_hotreload(self):
         """Start the main trading bot with comprehensive hot reload"""
         print("\n🤖 Starting Trading Bot with Hot Reload...")
@@ -90,8 +102,14 @@ class BotHotReloadLauncher:
             self.process = subprocess.Popen(
                 cmd,
                 cwd=self.root_dir,
-                universal_newlines=True
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding='utf-8',
+                errors='replace'
             )
+            self._start_stream_reader(self.process.stdout, "Bot-HotReload-out")
+            self._start_stream_reader(self.process.stderr, "Bot-HotReload-err")
             
             print("✅ Trading Bot with Hot Reload started (PID:", self.process.pid, ")")
             print("   🔥 Code changes will be applied instantly!")

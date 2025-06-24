@@ -10,6 +10,7 @@ import time
 import signal
 import os
 from pathlib import Path
+import threading
 
 class DashboardHotReloadLauncher:
     def __init__(self):
@@ -70,6 +71,17 @@ class DashboardHotReloadLauncher:
         print("✅ Dashboard prerequisites found")
         return True
         
+    def _start_stream_reader(self, stream, prefix):
+        """Starts a thread to read and print from a stream."""
+        def reader_thread():
+            for line in iter(stream.readline, ''):
+                print(f"[{prefix}] {line}", end='')
+            stream.close()
+        
+        thread = threading.Thread(target=reader_thread)
+        thread.daemon = True
+        thread.start()
+        
     def start_dashboard_backend_hotreload(self):
         """Start FastAPI dashboard backend with jurigged hot reload"""
         print("\n⚙️ Starting Dashboard Backend with Hot Reload...")
@@ -95,7 +107,18 @@ class DashboardHotReloadLauncher:
                 "--reload"  # Keep uvicorn's reload as backup
             ]
             
-            process = subprocess.Popen(cmd, cwd=self.root_dir)
+            process = subprocess.Popen(
+                cmd, 
+                cwd=self.root_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding='utf-8',
+                errors='replace'
+            )
+
+            self._start_stream_reader(process.stdout, "Backend-HotReload-out")
+            self._start_stream_reader(process.stderr, "Backend-HotReload-err")
             
             self.processes.append(("Dashboard Backend (Hot Reload)", process))
             print("✅ Dashboard Backend with Hot Reload started (PID:", process.pid, ")")
@@ -125,8 +148,16 @@ class DashboardHotReloadLauncher:
             # Start Vite dev server with hot reload
             process = subprocess.Popen(
                 ["npm", "run", "dev"],
-                cwd=frontend_dir
+                cwd=frontend_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding='utf-8',
+                errors='replace'
             )
+
+            self._start_stream_reader(process.stdout, "Frontend-out")
+            self._start_stream_reader(process.stderr, "Frontend-err")
             
             self.processes.append(("Dashboard Frontend (HMR)", process))
             print("✅ Dashboard Frontend started (PID:", process.pid, ")")

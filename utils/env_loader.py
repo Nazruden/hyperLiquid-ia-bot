@@ -3,8 +3,14 @@ from dotenv import load_dotenv
 
 class EnvLoader:
     def __init__(self):
-        # Explicitly reload environment variables from .env file
-        load_dotenv(override=True)
+        # Explicitly find and load the .env file from the project root
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        dotenv_path = os.path.join(project_root, '.env')
+        
+        if os.path.exists(dotenv_path):
+            load_dotenv(dotenv_path=dotenv_path, override=True)
+        else:
+            print(f"Warning: .env file not found at {dotenv_path}. Relying on system environment variables.")
         
     def get_config(self):
         """

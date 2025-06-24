@@ -62,6 +62,17 @@ class HotReloadLauncher:
         print("✅ All prerequisites found")
         return True
         
+    def _start_stream_reader(self, stream, prefix):
+        """Starts a thread to read and print from a stream."""
+        def reader_thread():
+            for line in iter(stream.readline, ''):
+                print(f"[{prefix}] {line}", end='')
+            stream.close()
+        
+        thread = threading.Thread(target=reader_thread)
+        thread.daemon = True
+        thread.start()
+        
     def start_trading_bot_hotreload(self):
         """Start the main trading bot with jurigged hot reload"""
         print("\n🤖 Starting Trading Bot with Hot Reload...")
@@ -87,8 +98,15 @@ class HotReloadLauncher:
             process = subprocess.Popen(
                 cmd,
                 cwd=self.root_dir,
-                universal_newlines=True
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding='utf-8',
+                errors='replace'
             )
+            self._start_stream_reader(process.stdout, "Bot-HotReload-out")
+            self._start_stream_reader(process.stderr, "Bot-HotReload-err")
+
             self.processes.append(("Trading Bot (Hot Reload)", process))
             print("✅ Trading Bot with Hot Reload started (PID:", process.pid, ")")
             print("   🔥 Code changes will be applied instantly!")
@@ -119,7 +137,17 @@ class HotReloadLauncher:
                 "--reload"  # Keep uvicorn's reload for file watching
             ]
             
-            process = subprocess.Popen(cmd, cwd=self.root_dir)
+            process = subprocess.Popen(
+                cmd, 
+                cwd=self.root_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding='utf-8',
+                errors='replace'
+            )
+            self._start_stream_reader(process.stdout, "Backend-HotReload-out")
+            self._start_stream_reader(process.stderr, "Backend-HotReload-err")
             
             self.processes.append(("Dashboard Backend (Hot Reload)", process))
             print("✅ Dashboard Backend with Hot Reload started (PID:", process.pid, ")")
@@ -145,8 +173,15 @@ class HotReloadLauncher:
                 
             process = subprocess.Popen(
                 ["npm", "run", "dev"],
-                cwd=frontend_dir
+                cwd=frontend_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding='utf-8',
+                errors='replace'
             )
+            self._start_stream_reader(process.stdout, "Frontend-out")
+            self._start_stream_reader(process.stderr, "Frontend-err")
             
             self.processes.append(("Dashboard Frontend", process))
             print("✅ Dashboard Frontend started (PID:", process.pid, ")")
