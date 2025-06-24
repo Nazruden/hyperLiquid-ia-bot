@@ -411,3 +411,4 @@ For questions or support, please contact the project maintainer or open an issue
 ---
 
 **⚠️ Disclaimer**: Trading cryptocurrencies involves substantial risk. This bot is for educational and research purposes. Always test thoroughly and never trade with funds you cannot afford to lose.
+# Additional content for testing interactive diff

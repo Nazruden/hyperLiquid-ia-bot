@@ -126,6 +126,24 @@ utils/
 └── setup.py          # System initialization and configuration
 ```
 
+### C₇: Dashboard Backend (FastAPI)
+
+- **Framework**: FastAPI for high-performance API and WebSocket endpoints.
+- **Data Service**: A dedicated `DataService` (`dashboard/backend/data_service.py`) handles all database interactions.
+  - **Optimization 1 (Concurrency)**: Initial dashboard data is fetched concurrently using `asyncio.gather` to minimize load times.
+  - **Optimization 2 (Indexing)**: The `trades` table is indexed on `(timestamp)` and `(coin, timestamp)` to accelerate dashboard queries.
+- **WebSocket Manager**: Manages WebSocket lifecycle and broadcasts real-time updates.
+
+### C₈: Dashboard Frontend (React + Vite)
+
+- **Framework**: React with TypeScript, built using Vite.
+- **State Management**: Zustand for global state management.
+- **WebSocket Handling**:
+  - A single, shared WebSocket connection is managed via a React Context (`WebSocketProvider`).
+  - This architecture prevents multiple connections and race conditions that were causing redundant API calls.
+  - Components subscribe to the central `useWebSocket` hook to receive real-time data, ensuring a consistent and efficient state sync.
+- **UI Components**: Shadcn UI and Recharts for data visualization.
+
 ## ⚙️ Environment Configuration
 
 ### 🔑 Required Environment Variables

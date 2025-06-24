@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 import json
 import sys
+import asyncio
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
@@ -97,8 +98,12 @@ class DataService:
                     )
                 """)
                 
+                # OPTIMIZATION: Add indexes to improve query performance
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_timestamp ON trades (timestamp)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_coin_timestamp ON trades (coin, timestamp)")
+                
                 conn.commit()
-                logger.info("Database structure created")
+                logger.info("Database structure created/verified with indexes")
                 
         except Exception as e:
             logger.error(f"Failed to create database structure: {e}")
@@ -133,12 +138,22 @@ class DataService:
                 })
                 logger.info(f"📊 Dashboard snapshot - Bot mode: {bot_status.get('mode')}, Monitoring: {bot_status.get('monitoring_enabled')}")
             
+            # OPTIMIZATION: Run database queries concurrently
+            results = await asyncio.gather(
+                self.get_trading_summary(),
+                self.get_recent_trades(limit=10),
+                self.get_current_positions(),
+                self.get_analytics_summary()
+            )
+            
+            trading_summary, recent_trades, current_positions, analytics_summary = results
+            
             snapshot = {
                 "bot_status": bot_status,
-                "trading_summary": await self.get_trading_summary(),
-                "recent_trades": await self.get_recent_trades(limit=10),
-                "current_positions": await self.get_current_positions(),
-                "analytics": await self.get_analytics_summary(),
+                "trading_summary": trading_summary,
+                "recent_trades": recent_trades,
+                "current_positions": current_positions,
+                "analytics": analytics_summary,
                 "timestamp": datetime.now().isoformat()
             }
             

@@ -1,13 +1,16 @@
 import Dashboard from "./components/Dashboard";
 import { ThemeProvider } from "./components/ThemeProvider";
 import ErrorBoundary from "./components/ErrorBoundary";
+import { WebSocketProvider } from "./context/WebSocketContext";
 
 function App() {
   return (
     <ErrorBoundary>
-      <ThemeProvider>
-        <Dashboard />
-      </ThemeProvider>
+      <WebSocketProvider>
+        <ThemeProvider>
+          <Dashboard />
+        </ThemeProvider>
+      </WebSocketProvider>
     </ErrorBoundary>
   );
 }

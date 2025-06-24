@@ -214,3 +214,57 @@ export interface ErrorInfo {
   details?: Record<string, unknown>;
   timestamp: string;
 }
+
+// =================================================================
+// WebSocket and State Sync Types (Moved from useWebSocket hook)
+// =================================================================
+
+export interface BotModeState {
+  mode: "STANDBY" | "ACTIVE";
+  monitoring_enabled: boolean;
+  active_cryptos: Record<string, unknown>;
+  crypto_count: number;
+  last_updated?: string;
+}
+
+export interface BotProcessState {
+  status: "running" | "stopped" | "starting" | "stopping";
+  pid?: number;
+  uptime: number;
+  external_process?: boolean;
+  restart_count?: number;
+  last_updated?: string;
+}
+
+export interface ActivityItem {
+  id: string;
+  timestamp: string;
+  activity_type: string;
+  token?: string;
+  title: string;
+  description: string;
+  severity: "SUCCESS" | "INFO" | "WARNING" | "ERROR";
+  data?: Record<string, unknown>;
+}
+
+export interface UseWebSocketReturn {
+  isConnected: boolean;
+  connectionError: string | null;
+  lastMessage: WebSocketMessage | null;
+  botStatus: BotStatus | null;
+  liveMetrics: LiveMetrics | null;
+  botModeState: BotModeState | null;
+  botProcessState: BotProcessState | null;
+  activityStream: ActivityItem[];
+  connectionStats: {
+    totalMessages: number;
+    lastHeartbeat?: string;
+    connectionTime?: string;
+  };
+  connect: () => void;
+  disconnect: () => void;
+  sendMessage: (message: Record<string, unknown>) => void;
+  requestFullStateSync: () => void;
+  clearActivityStream: () => void;
+  clearCachedState: () => void;
+}
