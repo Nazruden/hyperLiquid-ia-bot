@@ -171,6 +171,29 @@ export const useWebSocket = (
         console.log("📊 Received data snapshot");
         if (message.data?.bot_status) {
           setBotStatus(message.data.bot_status);
+
+          // ✅ FIX: Extract mode data from bot_status and sync to botModeState
+          // This ensures validation uses the same data as the display
+          const botStatus = message.data.bot_status;
+          if (
+            botStatus.mode !== undefined ||
+            botStatus.active_cryptos !== undefined
+          ) {
+            setBotModeState({
+              mode: botStatus.mode || "STANDBY",
+              monitoring_enabled: botStatus.monitoring_enabled || false,
+              active_cryptos: botStatus.active_cryptos || {},
+              crypto_count:
+                botStatus.crypto_count ||
+                Object.keys(botStatus.active_cryptos || {}).length,
+              last_updated: botStatus.last_updated || new Date().toISOString(),
+            });
+            console.log("🔄 Synced bot_status to botModeState:", {
+              mode: botStatus.mode,
+              active_cryptos_count: Object.keys(botStatus.active_cryptos || {})
+                .length,
+            });
+          }
         }
         if (message.data?.metrics) {
           setLiveMetrics(message.data.metrics);
@@ -341,12 +364,9 @@ export const useWebSocket = (
           connectionTime: new Date().toISOString(),
         }));
 
-        // Request full state sync on connection
-        setTimeout(() => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: "request_full_state_sync" }));
-          }
-        }, 100);
+        // ✅ FIX: Remove automatic sync on connection to prevent message flood
+        // State sync will be requested by components only when needed
+        console.log("🔌 WebSocket connected - state sync available on demand");
       };
 
       ws.onclose = (event) => {
@@ -451,8 +471,25 @@ export const useWebSocket = (
     }
   }, []);
 
-  // Enhanced state sync methods
+  // Enhanced state sync methods with debouncing
+  const lastSyncRef = useRef<number>(0);
+  const SYNC_COOLDOWN = 1000; // 1 second cooldown between sync requests
+
   const requestFullStateSync = useCallback(() => {
+    const now = Date.now();
+    const timeSinceLastSync = now - lastSyncRef.current;
+
+    if (timeSinceLastSync < SYNC_COOLDOWN) {
+      console.log(
+        `🔄 Sync request ignored - cooldown active (${
+          SYNC_COOLDOWN - timeSinceLastSync
+        }ms remaining)`
+      );
+      return;
+    }
+
+    lastSyncRef.current = now;
+    console.log("🔄 Sending full state sync request");
     sendMessage({ type: "request_full_state_sync" });
   }, [sendMessage]);
 

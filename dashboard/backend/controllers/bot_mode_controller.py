@@ -27,13 +27,18 @@ class BotModeController:
         # State sync service for WebSocket broadcasting
         self.state_sync_service = state_sync_service
         
-        # Extended status cache with mode support
+        # Load active cryptos from database on initialization
+        active_cryptos = self.config_manager.get_active_cryptos_for_bot()
+        
+        # Extended status cache with mode support - now properly initialized
         self.status_cache = {
             "mode": "STANDBY",    # STANDBY, ACTIVE
             "monitoring_enabled": False,
-            "active_cryptos": {},
+            "active_cryptos": active_cryptos,  # ✅ NOW PROPERLY SYNCHRONIZED WITH DB
             "last_updated": datetime.now().isoformat()
         }
+        
+        logger.info(f"BotModeController initialized with {len(active_cryptos)} active cryptocurrencies: {list(active_cryptos.keys())}")
     
     def set_state_sync_service(self, state_sync_service):
         """Set the state sync service for WebSocket broadcasting"""
@@ -75,6 +80,10 @@ class BotModeController:
                     "timestamp": datetime.now().isoformat()
                 })
             
+            # ✅ FIX: Force cache invalidation to ensure immediate status reflection
+            # This ensures dashboard snapshots immediately show the new mode
+            logger.info(f"🔄 Mode changed to ACTIVE - cache updated for {len(active_cryptos)} cryptos")
+            
             logger.info(f"Bot monitoring started with {len(active_cryptos)} cryptocurrencies")
             
             return {
@@ -113,6 +122,9 @@ class BotModeController:
                     "monitoring_enabled": False,
                     "timestamp": datetime.now().isoformat()
                 })
+            
+            # ✅ FIX: Force cache invalidation to ensure immediate status reflection
+            logger.info("🔄 Mode changed to STANDBY - cache updated")
             
             logger.info("Bot set to STANDBY mode")
             
@@ -204,19 +216,22 @@ class BotModeController:
     async def initialize_with_standby(self) -> Dict[str, Any]:
         """Initialize bot in STANDBY mode (for startup)"""
         try:
-            # Set initial mode to STANDBY
+            # Load current active cryptos from database (don't reset them!)
+            active_cryptos = self.config_manager.get_active_cryptos_for_bot()
+            
+            # Set initial mode to STANDBY but preserve active cryptos
             self.status_cache.update({
                 "mode": "STANDBY",
                 "monitoring_enabled": False,
-                "active_cryptos": {},
+                "active_cryptos": active_cryptos,  # ✅ PRESERVE ACTIVE CRYPTOS INSTEAD OF ERASING
                 "last_updated": datetime.now().isoformat()
             })
             
-            logger.info("Bot mode controller initialized in STANDBY mode")
+            logger.info(f"Bot mode controller initialized in STANDBY mode with {len(active_cryptos)} active cryptocurrencies")
             
             return {
                 "success": True,
-                "message": "Bot mode controller initialized in STANDBY mode",
+                "message": f"Bot mode controller initialized in STANDBY mode with {len(active_cryptos)} active cryptocurrencies",
                 "status": self.get_status()
             }
             

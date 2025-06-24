@@ -167,6 +167,36 @@ async def websocket_endpoint(websocket: WebSocket):
                         "timestamp": datetime.now().isoformat()
                     })
                 
+                # ✅ FIX: Handle state sync requests from frontend with rate limiting
+                elif message.get("type") == "request_full_state_sync":
+                    # Simple rate limiting: track last sync time per client
+                    current_time = datetime.now()
+                    last_sync_key = f"last_sync_{client_id}"
+                    
+                    # Check if we've synced recently (within 2 seconds)
+                    if hasattr(websocket_manager, 'client_sync_times'):
+                        last_sync = websocket_manager.client_sync_times.get(last_sync_key)
+                        if last_sync and (current_time - last_sync).total_seconds() < 2:
+                            logger.info(f"🔄 Sync request from {client_id} rate-limited")
+                            continue
+                    else:
+                        websocket_manager.client_sync_times = {}
+                    
+                    logger.info(f"🔄 Full state sync requested by client: {client_id}")
+                    websocket_manager.client_sync_times[last_sync_key] = current_time
+                    
+                    # Get fresh snapshot with corrected active_cryptos
+                    fresh_snapshot = await data_service.get_dashboard_snapshot()
+                    
+                    # Send complete state sync response
+                    await websocket.send_json({
+                        "type": "snapshot",
+                        "data": fresh_snapshot,
+                        "timestamp": datetime.now().isoformat()
+                    })
+                    
+                    logger.info(f"✅ State sync sent to client: {client_id}")
+                
             except WebSocketDisconnect:
                 break
             except Exception as e:

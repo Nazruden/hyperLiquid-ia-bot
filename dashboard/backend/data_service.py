@@ -116,6 +116,23 @@ class DataService:
             # Get real bot status from bot controller
             bot_status = self.bot_controller.get_status()
             
+            # ✅ FIX: Get mode status with active_cryptos from mode_controller directly
+            # This ensures the snapshot contains the correct active_cryptos data
+            mode_status_response = self.bot_controller.mode_controller.get_bot_mode_status()
+            mode_status = mode_status_response.get("data", {}) if mode_status_response.get("success") else {}
+            
+            # Merge mode status into bot_status to ensure active_cryptos are included
+            # Force refresh from cache to get the most recent mode status
+            if mode_status:
+                bot_status.update({
+                    "active_cryptos": mode_status.get("active_cryptos", {}),
+                    "crypto_count": mode_status.get("crypto_count", 0),
+                    "mode": mode_status.get("mode", "STANDBY"),
+                    "monitoring_enabled": mode_status.get("monitoring_enabled", False),
+                    "last_mode_update": mode_status.get("last_updated")
+                })
+                logger.info(f"📊 Dashboard snapshot - Bot mode: {bot_status.get('mode')}, Monitoring: {bot_status.get('monitoring_enabled')}")
+            
             snapshot = {
                 "bot_status": bot_status,
                 "trading_summary": await self.get_trading_summary(),

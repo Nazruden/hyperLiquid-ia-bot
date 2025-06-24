@@ -79,7 +79,7 @@ const BotStatus: React.FC<BotStatusProps> = ({ botStatus }) => {
     };
 
     loadInitialData();
-  }, [isConnected, requestFullStateSync, botModeState, botProcessState]);
+  }, [isConnected, requestFullStateSync]); // ✅ FIX: Removed botModeState, botProcessState to prevent infinite loop
 
   // Clear error when WebSocket reconnects
   useEffect(() => {
